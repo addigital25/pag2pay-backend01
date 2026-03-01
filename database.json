@@ -1,0 +1,95 @@
+{
+  "users": [
+    {
+      "id": "1",
+      "email": "admin@pag2pay.com",
+      "password": "admin123",
+      "name": "Administrador Master",
+      "role": "admin",
+      "createdAt": "2026-02-28T02:06:29.547Z"
+    },
+    {
+      "id": "2",
+      "email": "usuario@pag2pay.com",
+      "password": "usuario123",
+      "name": "Usuário Demo",
+      "role": "user",
+      "commissionRate": 70,
+      "createdAt": "2026-02-28T02:06:29.547Z"
+    }
+  ],
+  "products": [
+    {
+      "id": "1",
+      "code": "pro9yxgx",
+      "name": "Curso de Marketing Digital",
+      "description": "Aprenda estratégias avançadas de marketing",
+      "price": 497,
+      "image": "https://via.placeholder.com/300x200/4F46E5/FFFFFF?text=Marketing+Digital",
+      "producerId": "2",
+      "producerName": "Usuário Demo",
+      "affiliateEnabled": true,
+      "affiliateCommission": 30,
+      "paymentMethods": {
+        "pix": true,
+        "boleto": true,
+        "creditCard": true,
+        "afterPay": true
+      },
+      "category": "Educação",
+      "productType": "Curso",
+      "status": "active",
+      "approvalStatus": "APROVADO",
+      "createdAt": "2026-02-28T02:06:29.547Z"
+    },
+    {
+      "id": "2",
+      "code": "proe78xe",
+      "name": "E-book: Vendas Online",
+      "description": "Guia completo para vender na internet",
+      "price": 97,
+      "image": "https://via.placeholder.com/300x200/7C3AED/FFFFFF?text=E-book+Vendas",
+      "producerId": "2",
+      "producerName": "Usuário Demo",
+      "affiliateEnabled": true,
+      "affiliateCommission": 40,
+      "paymentMethods": {
+        "pix": true,
+        "boleto": true,
+        "creditCard": true,
+        "afterPay": false
+      },
+      "category": "Marketing",
+      "productType": "E-book",
+      "status": "active",
+      "approvalStatus": "PENDENTE",
+      "createdAt": "2026-02-28T02:06:29.547Z"
+    },
+    {
+      "id": "3",
+      "code": "prom4vgk",
+      "name": "Mentoria Individual",
+      "description": "Sessões personalizadas de consultoria",
+      "price": 997,
+      "image": "https://via.placeholder.com/300x200/059669/FFFFFF?text=Mentoria",
+      "producerId": "2",
+      "producerName": "Usuário Demo",
+      "affiliateEnabled": false,
+      "affiliateCommission": 0,
+      "paymentMethods": {
+        "pix": true,
+        "boleto": false,
+        "creditCard": true,
+        "afterPay": true
+      },
+      "category": "Consultoria",
+      "productType": "Serviço",
+      "status": "active",
+      "approvalStatus": "APROVADO",
+      "createdAt": "2026-02-28T02:06:29.547Z"
+    }
+  ],
+  "affiliations": [],
+  "orders": [],
+  "sales": []
+}

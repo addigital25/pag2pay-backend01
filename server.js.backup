@@ -1,0 +1,4574 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import cron from 'node-cron';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+import platformRoutes from './routes/platform.js';
+import platformProductsRoutes from './routes/platformProducts.js';
+
+// Importar bibliotecas para rastreio dos Correios
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import fetch from 'node-fetch';
+import crypto from 'crypto';
+
+// Carregar variáveis de ambiente
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const DB_FILE = './database.json';
+
+// Configuração CORS para produção
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  process.env.FRONTEND_URL,
+  process.env.ADMIN_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Permite requisições sem origin (mobile apps, postman, etc)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Configurar __dirname para ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Criar diretório de uploads se não existir
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!existsSync(uploadsDir)) {
+  mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Servir arquivos estáticos da pasta uploads
+app.use('/uploads', express.static(uploadsDir));
+
+// Configuração do multer para upload de imagens
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueName = `${Date.now()}-${uuidv4()}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Apenas imagens são permitidas (jpeg, jpg, png, gif, webp)'));
+    }
+  }
+});
+
+// Função para gerar código único do produto
+function generateProductCode() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let code = 'pro';
+  for (let i = 0; i < 5; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+// Inicializar banco de dados
+function initDB() {
+  if (!existsSync(DB_FILE)) {
+    const initialData = {
+      users: [
+        {
+          id: '1',
+          email: 'admin@pag2pay.com',
+          password: 'admin123',
+          name: 'Administrador Master',
+          role: 'admin',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: '2',
+          email: 'usuario@pag2pay.com',
+          password: 'usuario123',
+          name: 'Usuário Demo',
+          role: 'user',
+          commissionRate: 70,
+          createdAt: new Date().toISOString()
+        }
+      ],
+      products: [
+        {
+          id: '1',
+          code: 'pro9yxgx',
+          name: 'Curso de Marketing Digital',
+          description: 'Aprenda estratégias avançadas de marketing',
+          price: 497.00,
+          image: 'https://via.placeholder.com/300x200/4F46E5/FFFFFF?text=Marketing+Digital',
+          stock: 50,
+          producerId: '2',
+          producerName: 'Usuário Demo',
+          affiliateEnabled: true,
+          affiliateCommission: 30,
+          paymentMethods: {
+            pix: true,
+            boleto: true,
+            creditCard: true,
+            afterPay: true
+          },
+          category: 'Educação',
+          productType: 'Curso',
+          status: 'active',
+          approvalStatus: 'APROVADO'
+        },
+        {
+          id: '2',
+          code: 'proe78xe',
+          name: 'E-book: Vendas Online',
+          description: 'Guia completo para vender na internet',
+          price: 97.00,
+          image: 'https://via.placeholder.com/300x200/7C3AED/FFFFFF?text=E-book+Vendas',
+          stock: 100,
+          producerId: '2',
+          producerName: 'Usuário Demo',
+          affiliateEnabled: true,
+          affiliateCommission: 40,
+          paymentMethods: {
+            pix: true,
+            boleto: true,
+            creditCard: true,
+            afterPay: false
+          },
+          category: 'Marketing',
+          productType: 'E-book',
+          status: 'active',
+          approvalStatus: 'PENDENTE'
+        },
+        {
+          id: '3',
+          code: 'prom4vgk',
+          name: 'Mentoria Individual',
+          description: 'Sessões personalizadas de consultoria',
+          price: 997.00,
+          image: 'https://via.placeholder.com/300x200/059669/FFFFFF?text=Mentoria',
+          stock: 10,
+          producerId: '2',
+          producerName: 'Usuário Demo',
+          affiliateEnabled: false,
+          affiliateCommission: 0,
+          paymentMethods: {
+            pix: true,
+            boleto: false,
+            creditCard: true,
+            afterPay: false
+          },
+          category: 'Negócios',
+          productType: 'Assinatura',
+          status: 'active',
+          approvalStatus: 'AGUARDANDO ALTERAÇÃO'
+        }
+      ],
+      orders: [
+        {
+          id: 'demo-order-1',
+          productId: '1',
+          productName: 'Curso de Marketing Digital',
+          productPrice: 497.00,
+          quantity: 1,
+          totalValue: 497.00,
+          producerId: '2',
+          producerName: 'Usuário Demo',
+          affiliateId: null,
+          affiliateName: null,
+          producerCommission: 497.00,
+          affiliateCommission: 0,
+          customer: {
+            name: 'Cliente Teste',
+            email: 'cliente@exemplo.com',
+            phone: '(11) 99999-9999',
+            address: 'Rua Exemplo, 123',
+            city: 'São Paulo',
+            state: 'SP',
+            zipCode: '01234-567'
+          },
+          paymentMethod: 'pix',
+          paymentStatus: 'paid',
+          status: 'shipped',
+          trackingCode: 'BR123456789',
+          shippingInfo: {
+            carrier: 'Correios',
+            estimatedDelivery: '2026-03-05',
+            shippingStatus: 'shipped',
+            shippingDate: new Date().toISOString()
+          },
+          createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+          updatedAt: new Date().toISOString(),
+          paidAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+        }
+      ],
+      affiliations: [],
+      commissions: []
+    };
+    writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2));
+  }
+}
+
+function readDB() {
+  return JSON.parse(readFileSync(DB_FILE, 'utf-8'));
+}
+
+function writeDB(data) {
+  writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+}
+
+initDB();
+
+// Tornar readDB e writeDB disponíveis para as rotas
+app.set('readDB', readDB);
+app.set('writeDB', writeDB);
+
+// ============ ROTAS DO PLATFORM ADMIN ============
+app.use('/api/platform', platformRoutes);
+app.use('/api/platform/products', platformProductsRoutes);
+
+// Rotas de Autenticação
+
+// Login de Usuário
+app.post('/api/auth/login/user', (req, res) => {
+  const db = readDB();
+  const { email, password } = req.body;
+
+  const user = db.users.find(u => u.email === email && u.password === password && u.role === 'user');
+
+  if (user) {
+    const { password, ...userWithoutPassword } = user;
+    res.json({
+      success: true,
+      user: userWithoutPassword,
+      token: uuidv4()
+    });
+  } else {
+    res.status(401).json({ success: false, error: 'Email ou senha inválidos ou você não tem permissão de usuário' });
+  }
+});
+
+// Login de Administrador
+app.post('/api/auth/login/admin', (req, res) => {
+  const db = readDB();
+  const { email, password } = req.body;
+
+  const user = db.users.find(u => u.email === email && u.password === password && u.role === 'admin');
+
+  if (user) {
+    const { password, ...userWithoutPassword } = user;
+    res.json({
+      success: true,
+      user: userWithoutPassword,
+      token: uuidv4()
+    });
+  } else {
+    res.status(401).json({ success: false, error: 'Email ou senha inválidos ou você não tem permissão de administrador' });
+  }
+});
+
+// Manter endpoint genérico para compatibilidade (deprecated)
+app.post('/api/auth/login', (req, res) => {
+  const db = readDB();
+  const { email, password } = req.body;
+
+  const user = db.users.find(u => u.email === email && u.password === password);
+
+  if (user) {
+    const { password, ...userWithoutPassword } = user;
+    res.json({
+      success: true,
+      user: userWithoutPassword,
+      token: uuidv4()
+    });
+  } else {
+    res.status(401).json({ success: false, error: 'Email ou senha inválidos' });
+  }
+});
+
+// Endpoint de Upload de Imagens
+app.post('/api/upload/image', upload.single('image'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Nenhuma imagem foi enviada' });
+    }
+
+    // Retornar a URL da imagem
+    const imageUrl = `http://localhost:${PORT}/uploads/${req.file.filename}`;
+
+    res.json({
+      success: true,
+      url: imageUrl,
+      filename: req.file.filename,
+      size: req.file.size,
+      mimetype: req.file.mimetype
+    });
+  } catch (error) {
+    console.error('Erro ao fazer upload:', error);
+    res.status(500).json({ error: 'Erro ao fazer upload da imagem' });
+  }
+});
+
+app.post('/api/auth/register', (req, res) => {
+  const db = readDB();
+  const { email, password, name } = req.body;
+
+  const existingUser = db.users.find(u => u.email === email);
+  if (existingUser) {
+    return res.status(400).json({ success: false, error: 'Email já cadastrado' });
+  }
+
+  const newUser = {
+    id: uuidv4(),
+    email,
+    password,
+    name,
+    role: 'user',
+    createdAt: new Date().toISOString()
+  };
+
+  db.users.push(newUser);
+  writeDB(db);
+
+  const { password: _, ...userWithoutPassword } = newUser;
+  res.status(201).json({
+    success: true,
+    user: userWithoutPassword,
+    token: uuidv4()
+  });
+});
+
+// Rotas de Produtos
+app.get('/api/products', (req, res) => {
+  const db = readDB();
+  const { userId, type } = req.query;
+
+  let products = db.products;
+
+  if (type === 'my-products' && userId) {
+    products = products.filter(p => p.producerId === userId);
+  } else if (type === 'affiliate-store') {
+    products = products.filter(p => p.affiliateEnabled && p.status === 'active');
+
+    // Calcular vendas por produto para determinar bestsellers
+    const salesByProduct = {};
+    db.orders.forEach(order => {
+      if (order.paymentStatus === 'paid') {
+        order.items.forEach(item => {
+          salesByProduct[item.productId] = (salesByProduct[item.productId] || 0) + item.quantity;
+        });
+      }
+    });
+
+    // Determinar threshold para bestseller (top 20% dos produtos mais vendidos)
+    const salesValues = Object.values(salesByProduct).sort((a, b) => b - a);
+    const bestsellerThreshold = salesValues.length > 0 ? salesValues[Math.floor(salesValues.length * 0.2)] || 5 : 5;
+
+    // Adicionar flag isBestseller aos produtos
+    products = products.map(p => ({
+      ...p,
+      totalSales: salesByProduct[p.id] || 0,
+      isBestseller: (salesByProduct[p.id] || 0) >= bestsellerThreshold && (salesByProduct[p.id] || 0) >= 5
+    }));
+  } else if (type === 'my-affiliations' && userId) {
+    const userAffiliations = db.affiliations.filter(a => a.affiliateId === userId);
+    const affiliatedProductIds = userAffiliations.map(a => a.productId);
+    products = products.filter(p => affiliatedProductIds.includes(p.id));
+  }
+
+  res.json(products);
+});
+
+app.get('/api/products/:id', (req, res) => {
+  const db = readDB();
+  const product = db.products.find(p => p.id === req.params.id);
+  if (product) {
+    res.json(product);
+  } else {
+    res.status(404).json({ error: 'Produto não encontrado' });
+  }
+});
+
+app.post('/api/products', (req, res) => {
+  const db = readDB();
+  const productData = req.body;
+
+  const newProduct = {
+    id: uuidv4(),
+    code: generateProductCode(),
+    ...productData,
+    createdAt: new Date().toISOString(),
+    status: 'active',
+    approvalStatus: 'PENDENTE'
+  };
+
+  db.products.push(newProduct);
+  writeDB(db);
+
+  res.status(201).json(newProduct);
+});
+
+app.patch('/api/products/:id', (req, res) => {
+  const db = readDB();
+  const productIndex = db.products.findIndex(p => p.id === req.params.id);
+
+  if (productIndex === -1) {
+    return res.status(404).json({ error: 'Produto não encontrado' });
+  }
+
+  console.log('\n========================================');
+  console.log('📝 PATCH /api/products/:id');
+  console.log('========================================');
+  console.log('ID do produto:', req.params.id);
+  console.log('Cupons no body:', req.body.coupons);
+  console.log('Quantidade de cupons:', req.body.coupons?.length || 0);
+  console.log('Tipo do coupons:', typeof req.body.coupons);
+  console.log('É array?', Array.isArray(req.body.coupons));
+
+  if (req.body.coupons && Array.isArray(req.body.coupons)) {
+    console.log('CUPONS DETALHADOS:');
+    req.body.coupons.forEach((coupon, index) => {
+      console.log(`  Cupom ${index + 1}:`, JSON.stringify(coupon));
+    });
+  }
+
+  console.log('Produto ANTES da atualização:', {
+    id: db.products[productIndex].id,
+    coupons: db.products[productIndex].coupons?.length || 0
+  });
+
+  db.products[productIndex] = {
+    ...db.products[productIndex],
+    ...req.body,
+    updatedAt: new Date().toISOString()
+  };
+
+  writeDB(db);
+
+  console.log('Produto DEPOIS da atualização:', {
+    id: db.products[productIndex].id,
+    coupons: db.products[productIndex].coupons?.length || 0
+  });
+  console.log('✅ Produto salvo no database.json');
+  console.log('========================================\n');
+
+  res.json(db.products[productIndex]);
+});
+
+// ========== ROTAS DE APROVAÇÃO DE PRODUTOS (ADMIN) ==========
+
+// Listar todos os produtos (com filtro por approvalStatus)
+app.get('/api/admin/products', (req, res) => {
+  const db = readDB();
+  const { approvalStatus } = req.query;
+
+  let products = db.products;
+
+  if (approvalStatus) {
+    products = products.filter(p => p.approvalStatus === approvalStatus);
+  }
+
+  res.json(products);
+});
+
+// Aprovar produto
+app.patch('/api/admin/products/:id/approve', (req, res) => {
+  const db = readDB();
+  const productIndex = db.products.findIndex(p => p.id === req.params.id);
+
+  if (productIndex === -1) {
+    return res.status(404).json({ error: 'Produto não encontrado' });
+  }
+
+  db.products[productIndex].approvalStatus = 'APROVADO';
+  db.products[productIndex].approvedAt = new Date().toISOString();
+
+  writeDB(db);
+
+  console.log(`✅ Produto aprovado: ${db.products[productIndex].name}`);
+
+  res.json({
+    success: true,
+    message: 'Produto aprovado com sucesso',
+    product: db.products[productIndex]
+  });
+});
+
+// Rejeitar produto
+app.patch('/api/admin/products/:id/reject', (req, res) => {
+  const db = readDB();
+  const { reason } = req.body;
+  const productIndex = db.products.findIndex(p => p.id === req.params.id);
+
+  if (productIndex === -1) {
+    return res.status(404).json({ error: 'Produto não encontrado' });
+  }
+
+  db.products[productIndex].approvalStatus = 'REJEITADO';
+  db.products[productIndex].rejectedAt = new Date().toISOString();
+  db.products[productIndex].rejectionReason = reason || 'Não especificado';
+
+  writeDB(db);
+
+  console.log(`❌ Produto rejeitado: ${db.products[productIndex].name} - Motivo: ${reason}`);
+
+  res.json({
+    success: true,
+    message: 'Produto rejeitado',
+    product: db.products[productIndex]
+  });
+});
+
+// Endpoint para Platform Admin - Listar produtos formatados
+app.get('/api/platform/products', (req, res) => {
+  const db = readDB();
+
+  // Converter produtos do database.json para o formato esperado pelo Platform Admin
+  const platformProducts = db.products.map(product => ({
+    id: product.id,
+    name: product.name,
+    seller: product.producerName,
+    sellerId: product.producerId,
+    price: product.price,
+    sales: 0, // TODO: calcular vendas reais
+    revenue: 0, // TODO: calcular receita real
+    commission: 0, // TODO: calcular comissão real
+    status: product.approvalStatus === 'APROVADO' ? 'active' :
+            product.approvalStatus === 'PENDENTE' ? 'pending' : 'suspended',
+    category: product.category,
+    createdAt: product.createdAt,
+    pendingReason: product.approvalStatus === 'PENDENTE' ? 'Aguardando aprovação inicial' :
+                   product.rejectionReason || undefined
+  }));
+
+  res.json(platformProducts);
+});
+
+// Aprovar produto via Platform Admin
+app.patch('/api/platform/products/:id/approve', (req, res) => {
+  const db = readDB();
+  const productIndex = db.products.findIndex(p => p.id == req.params.id);
+
+  if (productIndex === -1) {
+    return res.status(404).json({ error: 'Produto não encontrado' });
+  }
+
+  db.products[productIndex].approvalStatus = 'APROVADO';
+  db.products[productIndex].approvedAt = new Date().toISOString();
+
+  writeDB(db);
+
+  console.log(`✅ [PLATFORM] Produto aprovado: ${db.products[productIndex].name}`);
+
+  res.json({
+    success: true,
+    message: 'Produto aprovado com sucesso'
+  });
+});
+
+// Rejeitar produto via Platform Admin
+app.patch('/api/platform/products/:id/reject', (req, res) => {
+  const db = readDB();
+  const { reason } = req.body;
+  const productIndex = db.products.findIndex(p => p.id == req.params.id);
+
+  if (productIndex === -1) {
+    return res.status(404).json({ error: 'Produto não encontrado' });
+  }
+
+  db.products[productIndex].approvalStatus = 'REJEITADO';
+  db.products[productIndex].rejectedAt = new Date().toISOString();
+  db.products[productIndex].rejectionReason = reason || 'Não especificado';
+
+  writeDB(db);
+
+  console.log(`❌ [PLATFORM] Produto rejeitado: ${db.products[productIndex].name}`);
+
+  res.json({
+    success: true,
+    message: 'Produto rejeitado'
+  });
+});
+
+// Suspender produto via Platform Admin
+app.patch('/api/platform/products/:id/suspend', (req, res) => {
+  const db = readDB();
+  const { reason } = req.body;
+  const productIndex = db.products.findIndex(p => p.id == req.params.id);
+
+  if (productIndex === -1) {
+    return res.status(404).json({ error: 'Produto não encontrado' });
+  }
+
+  db.products[productIndex].approvalStatus = 'SUSPENSO';
+  db.products[productIndex].suspendedAt = new Date().toISOString();
+  db.products[productIndex].suspensionReason = reason || 'Não especificado';
+
+  writeDB(db);
+
+  console.log(`⛔ [PLATFORM] Produto suspenso: ${db.products[productIndex].name}`);
+
+  res.json({
+    success: true,
+    message: 'Produto suspenso'
+  });
+});
+
+// Rotas de Afiliações
+app.post('/api/affiliations', (req, res) => {
+  const db = readDB();
+  const { productId, affiliateId } = req.body;
+
+  const product = db.products.find(p => p.id === productId);
+  const affiliate = db.users.find(u => u.id === affiliateId);
+
+  if (!product || !affiliate) {
+    return res.status(404).json({ error: 'Produto ou afiliado não encontrado' });
+  }
+
+  if (!product.affiliateEnabled) {
+    return res.status(400).json({ error: 'Este produto não aceita afiliados' });
+  }
+
+  const existingAffiliation = db.affiliations.find(
+    a => a.productId === productId && a.affiliateId === affiliateId
+  );
+
+  if (existingAffiliation) {
+    return res.status(400).json({ error: 'Você já é afiliado deste produto' });
+  }
+
+  const affiliation = {
+    id: uuidv4(),
+    productId,
+    affiliateId,
+    affiliateName: affiliate.name,
+    productName: product.name,
+    commission: product.affiliateCommission,
+    createdAt: new Date().toISOString(),
+    status: 'active'
+  };
+
+  db.affiliations.push(affiliation);
+  writeDB(db);
+
+  res.status(201).json(affiliation);
+});
+
+app.get('/api/affiliations', (req, res) => {
+  const db = readDB();
+  const { affiliateId } = req.query;
+
+  let affiliations = db.affiliations;
+
+  if (affiliateId) {
+    affiliations = affiliations.filter(a => a.affiliateId === affiliateId);
+  }
+
+  res.json(affiliations);
+});
+
+// Rotas de Pedidos
+app.post('/api/orders', (req, res) => {
+  const db = readDB();
+  const { productId, customer, quantity = 1, paymentMethod = 'pix', pixExpirationMinutes = 2880, affiliateId = null, selectedPlanName = null } = req.body;
+
+  const product = db.products.find(p => p.id === productId);
+  if (!product) {
+    return res.status(404).json({ error: 'Produto não encontrado' });
+  }
+
+  // ========== CORREÇÃO: Usar preço do PLANO se selecionado ==========
+  let finalPrice = product.price;
+  let selectedPlan = null;
+
+  if (selectedPlanName && product.plans && product.plans.length > 0) {
+    selectedPlan = product.plans.find(p => p.name === selectedPlanName);
+    if (selectedPlan) {
+      finalPrice = selectedPlan.price;
+      console.log(`✅ Plano selecionado: "${selectedPlanName}" - Preço: R$ ${finalPrice}`);
+    } else {
+      console.log(`⚠️ Plano "${selectedPlanName}" não encontrado, usando preço base: R$ ${product.price}`);
+    }
+  }
+
+  const totalValue = finalPrice * quantity;
+  console.log(`📊 Cálculo: R$ ${finalPrice} x ${quantity} = R$ ${totalValue}`);
+
+  // ========== LOG DE DEPURAÇÃO: Dados do Cliente ==========
+  console.log(`\n👤 ========== DADOS DO CLIENTE RECEBIDOS ==========`);
+  console.log(`Nome: "${customer?.name || 'NÃO INFORMADO'}"`);
+  console.log(`Email: "${customer?.email || 'NÃO INFORMADO'}"`);
+  console.log(`CPF: "${customer?.cpf || 'NÃO INFORMADO'}"`);
+  console.log(`Telefone: "${customer?.phone || 'NÃO INFORMADO'}"`);
+  console.log(`Endereço: "${customer?.address || 'NÃO INFORMADO'}"`);
+  console.log(`Número: "${customer?.number || 'NÃO INFORMADO'}"`);
+  console.log(`Bairro: "${customer?.neighborhood || 'NÃO INFORMADO'}"`);
+  console.log(`Cidade: "${customer?.city || 'NÃO INFORMADO'}"`);
+  console.log(`Estado: "${customer?.state || 'NÃO INFORMADO'}"`);
+  console.log(`CEP: "${customer?.zipCode || 'NÃO INFORMADO'}"`);
+  console.log(`==================================================\n`);
+
+  // Calcular comissões
+  let producerCommission = totalValue;
+  let affiliateCommission = 0;
+
+  if (affiliateId && product.affiliateEnabled) {
+    affiliateCommission = (totalValue * product.affiliateCommission) / 100;
+    producerCommission = totalValue - affiliateCommission;
+  }
+
+  const orderId = uuidv4();
+
+  const order = {
+    id: orderId,
+    productId,
+    productCode: product.code,
+    productName: product.name,
+    selectedPlanName,
+    selectedPlanPrice: selectedPlan ? selectedPlan.price : null,
+    plan: selectedPlan ? {  // ✅ NOVO: Objeto completo do plano para gerar link do checkout
+      code: selectedPlan.code,
+      name: selectedPlan.name,
+      price: selectedPlan.price,
+      description: selectedPlan.description,
+      itemsQuantity: selectedPlan.itemsQuantity
+    } : null,
+    productPrice: finalPrice,  // Preço final (plano ou base)
+    quantity,
+    totalValue,
+    producerId: product.producerId,
+    producerName: product.producerName,
+    affiliateId,
+    affiliateName: affiliateId ? db.users.find(u => u.id === affiliateId)?.name : null,
+    producerCommission,
+    affiliateCommission,
+    customer,
+    paymentMethod,
+    pixExpirationMinutes: paymentMethod === 'pix' ? pixExpirationMinutes : undefined,
+    paymentStatus: paymentMethod === 'afterPay' ? 'scheduled' : 'pending',
+    status: 'pending',
+    trackingCode: null,
+    shippingInfo: {
+      carrier: null,
+      estimatedDelivery: null,
+      shippingStatus: 'not_shipped',
+      shippingDate: null
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    paidAt: null
+  };
+
+  db.orders.push(order);
+
+  // ========== LOG: Confirmar que foi salvo corretamente ==========
+  console.log(`✅ ========== PEDIDO SALVO NO BANCO ==========`);
+  console.log(`ID do Pedido: ${order.id}`);
+  console.log(`Cliente salvo: "${order.customer?.name}"`);
+  console.log(`Email salvo: "${order.customer?.email}"`);
+  console.log(`CPF salvo: "${order.customer?.cpf}"`);
+  console.log(`Endereço salvo: "${order.customer?.address}, ${order.customer?.number}"`);
+  console.log(`Cidade salva: "${order.customer?.city}/${order.customer?.state}"`);
+  console.log(`Valor salvo: R$ ${order.totalValue}`);
+  console.log(`Plano salvo: "${order.selectedPlanName || 'Sem plano'}"`);
+  console.log(`==============================================\n`);
+
+  // Criar registro de comissão
+  if (affiliateCommission > 0) {
+    const commission = {
+      id: uuidv4(),
+      orderId: order.id,
+      productId,
+      producerId: product.producerId,
+      affiliateId,
+      producerCommission,
+      affiliateCommission,
+      totalValue,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+    db.commissions.push(commission);
+  }
+
+  // Se for AfterPay, associar CPF bloqueado ao pedido
+  if (paymentMethod === 'afterPay' && customer.cpf) {
+    if (!db.blockedCpfs) {
+      db.blockedCpfs = [];
+    }
+
+    // Atualizar bloqueio pendente ou criar novo
+    const blockedCpfIndex = db.blockedCpfs.findIndex(b => b.cpf === customer.cpf && b.orderId === 'pending');
+    if (blockedCpfIndex !== -1) {
+      db.blockedCpfs[blockedCpfIndex].orderId = order.id;
+    } else {
+      db.blockedCpfs.push({
+        id: uuidv4(),
+        cpf: customer.cpf,
+        orderId: order.id,
+        blockedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  writeDB(db);
+
+  // Disparar webhook baseado no status do pedido
+  if (paymentMethod === 'afterPay') {
+    // AfterPay começa como "agendado"
+    dispararWebhookPortugues(product.producerId, 'agendado', order);
+
+    // Enviar pedido AfterPay (agendado) ao Notazz
+    console.log(`\n🔍 Verificando configuração Notazz para usuário ${product.producerId}...`);
+    const notazzConfig = db.notazzConfigs?.find(c => c.userId === product.producerId);
+
+    if (notazzConfig) {
+      console.log(`✅ Configuração Notazz encontrada:`, {
+        webhookId: notazzConfig.webhookId,
+        enabled: notazzConfig.enabled,
+        autoSend: notazzConfig.autoSend
+      });
+
+      if (notazzConfig.enabled && notazzConfig.autoSend) {
+        console.log(`🚀 Enviando pedido AfterPay ${order.id} (agendado) automaticamente para Notazz...`);
+        enviarPedidoNotazz(order.id, product.producerId);
+      } else {
+        console.log(`⚠️ Notazz configurado mas:`, {
+          enabled: notazzConfig.enabled,
+          autoSend: notazzConfig.autoSend
+        });
+        console.log(`Pedido ${order.id} NÃO será enviado automaticamente`);
+      }
+    } else {
+      console.log(`❌ Nenhuma configuração Notazz encontrada para usuário ${product.producerId}`);
+      console.log(`Total de configurações Notazz no banco: ${db.notazzConfigs?.length || 0}`);
+      if (db.notazzConfigs && db.notazzConfigs.length > 0) {
+        console.log(`IDs de usuários com Notazz configurado:`, db.notazzConfigs.map(c => c.userId));
+      }
+    }
+  } else {
+    // Outros métodos começam como "aguardando pagamento"
+    dispararWebhookPortugues(product.producerId, 'aguardandoPagamento', order);
+  }
+
+  res.status(201).json(order);
+});
+
+app.get('/api/orders', (req, res) => {
+  const db = readDB();
+  res.json(db.orders);
+});
+
+app.get('/api/orders/:id', (req, res) => {
+  const db = readDB();
+  const order = db.orders.find(o => o.id === req.params.id);
+  if (order) {
+    res.json(order);
+  } else {
+    res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+});
+
+// Cache de rastreio (30 minutos)
+const trackingCache = new Map();
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutos em milissegundos
+
+// Função auxiliar para buscar rastreio usando CONTRATOS DO USUÁRIO
+async function fetchCorreiosTracking(trackingCode, userId) {
+  console.log(`🔍 Tentando buscar rastreio: ${trackingCode} (userId: ${userId})`);
+
+  const db = readDB();
+
+  // Buscar contratos ativos do usuário
+  const userContracts = db.correiosContracts
+    .filter(c => c.userId === userId && c.isActive)
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); // Mais antigo primeiro
+
+  // Se não há contratos cadastrados, retornar erro
+  if (userContracts.length === 0) {
+    console.log('⚠️  Nenhum contrato dos Correios cadastrado para este usuário');
+    return null;
+  }
+
+  console.log(`📦 ${userContracts.length} contrato(s) encontrado(s) para o usuário`);
+
+  // Tentar cada contrato em ordem
+  for (let i = 0; i < userContracts.length; i++) {
+    const contract = userContracts[i];
+
+    try {
+      console.log(`   → Tentativa ${i + 1}: Contrato "${contract.name}"...`);
+
+      // Descriptografar o token
+      const decryptedToken = decryptToken(contract.accessToken);
+
+      const response = await axios.post(
+        'https://webservice.correios.com.br/service/rest/rastro/rastroMobile',
+        `usuario=${contract.username}&senha=${decryptedToken}&tipo=L&resultado=T&objetos=${trackingCode}`,
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'Dart/2.19 (dart:io)',
+            'Accept': 'application/xml'
+          },
+          timeout: 10000
+        }
+      );
+
+      if (response.data && response.data.includes('<objeto>')) {
+        console.log(`   ✅ Sucesso com contrato: ${contract.name}`);
+
+        // Atualizar status do último teste
+        const contractIndex = db.correiosContracts.findIndex(c => c.id === contract.id);
+        db.correiosContracts[contractIndex].lastTestedAt = new Date().toISOString();
+        db.correiosContracts[contractIndex].lastTestStatus = 'success';
+
+        const trackingData = parseCorreiosXML(response.data, trackingCode);
+        db.correiosContracts[contractIndex].lastTestMessage = `${trackingData.quantidade} eventos encontrados`;
+        writeDB(db);
+
+        return trackingData;
+      }
+    } catch (error) {
+      console.log(`   ❌ Falha no contrato "${contract.name}": ${error.message}`);
+
+      // Atualizar status do último teste
+      const contractIndex = db.correiosContracts.findIndex(c => c.id === contract.id);
+      db.correiosContracts[contractIndex].lastTestedAt = new Date().toISOString();
+      db.correiosContracts[contractIndex].lastTestStatus = 'failed';
+      db.correiosContracts[contractIndex].lastTestMessage = error.message;
+      writeDB(db);
+    }
+  }
+
+  // Se todos os contratos falharam, retornar null (sem dados demo)
+  console.log('❌ Todos os contratos falharam. Sem rastreio disponível.');
+  return null;
+}
+
+// Função para fazer parsing do XML dos Correios
+function parseCorreiosXML(xmlData, trackingCode) {
+  const $ = cheerio.load(xmlData, { xmlMode: true });
+  const eventos = [];
+
+  $('evento').each((i, element) => {
+    const $evt = $(element);
+    const tipo = $evt.find('tipo').text().trim();
+    const status = $evt.find('status').text().trim();
+    const data = $evt.find('data').text().trim();
+    const hora = $evt.find('hora').text().trim();
+    const local = $evt.find('local').text().trim();
+    const cidade = $evt.find('cidade').text().trim();
+    const uf = $evt.find('uf').text().trim();
+    const descricao = $evt.find('descricao').text().trim();
+
+    eventos.push({
+      data: `${data} ${hora}`,
+      local: cidade && uf ? `${cidade}/${uf}` : local,
+      status: tipo || status,
+      subStatus: descricao ? [descricao] : []
+    });
+  });
+
+  return {
+    codigo: trackingCode,
+    eventos: eventos,
+    quantidade: eventos.length
+  };
+}
+
+// ============================================
+// SISTEMA DE CRIPTOGRAFIA PARA CONTRATOS CORREIOS
+// ============================================
+
+const ENCRYPTION_KEY = process.env.CORREIOS_SECRET_KEY || 'afterpay-correios-secret-key-2024-default'; // Deve ter 32 caracteres
+const ALGORITHM = 'aes-256-cbc';
+
+// Ajustar chave para ter exatamente 32 bytes
+function getEncryptionKey() {
+  const key = Buffer.from(ENCRYPTION_KEY);
+  return crypto.createHash('sha256').update(key).digest();
+}
+
+// Criptografar token de acesso
+function encryptToken(text) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(ALGORITHM, getEncryptionKey(), iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+// Descriptografar token de acesso
+function decryptToken(encryptedText) {
+  const parts = encryptedText.split(':');
+  const iv = Buffer.from(parts[0], 'hex');
+  const encrypted = parts[1];
+  const decipher = crypto.createDecipheriv(ALGORITHM, getEncryptionKey(), iv);
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
+
+// ============================================
+// ENDPOINTS - GESTÃO DE CONTRATOS CORREIOS
+// ============================================
+
+// 1. Listar contratos do usuário
+app.get('/api/correios-contracts', (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId é obrigatório' });
+    }
+
+    const db = readDB();
+    const contracts = db.correiosContracts.filter(c => c.userId === userId);
+
+    // Remover access_token da resposta por segurança
+    const safeContracts = contracts.map(({ accessToken, ...contract }) => contract);
+
+    res.json(safeContracts);
+  } catch (error) {
+    console.error('Erro ao listar contratos:', error);
+    res.status(500).json({ error: 'Erro ao listar contratos' });
+  }
+});
+
+// 2. Criar novo contrato
+app.post('/api/correios-contracts', (req, res) => {
+  try {
+    const { userId, name, username, accessToken, contractNumber, isActive } = req.body;
+
+    // Validações
+    if (!userId || !name || !username || !accessToken || !contractNumber) {
+      return res.status(400).json({
+        error: 'Campos obrigatórios: userId, name, username, accessToken, contractNumber'
+      });
+    }
+
+    const db = readDB();
+
+    // Criptografar o token de acesso
+    const encryptedToken = encryptToken(accessToken);
+
+    // Criar novo contrato
+    const newContract = {
+      id: uuidv4(),
+      userId: userId,
+      name: name,
+      username: username,
+      accessToken: encryptedToken,
+      contractNumber: contractNumber,
+      isActive: isActive !== undefined ? isActive : true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastTestedAt: null,
+      lastTestStatus: null,
+      lastTestMessage: null
+    };
+
+    db.correiosContracts.push(newContract);
+    writeDB(db);
+
+    // Retornar sem o token
+    const { accessToken: _, ...safeContract } = newContract;
+
+    res.json({
+      success: true,
+      message: 'Contrato criado com sucesso!',
+      contract: safeContract
+    });
+  } catch (error) {
+    console.error('Erro ao criar contrato:', error);
+    res.status(500).json({ error: 'Erro ao criar contrato' });
+  }
+});
+
+// 3. Editar contrato
+app.put('/api/correios-contracts/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, username, accessToken, contractNumber, isActive } = req.body;
+
+    const db = readDB();
+    const contractIndex = db.correiosContracts.findIndex(c => c.id === id);
+
+    if (contractIndex === -1) {
+      return res.status(404).json({ error: 'Contrato não encontrado' });
+    }
+
+    // Atualizar campos
+    if (name) db.correiosContracts[contractIndex].name = name;
+    if (username) db.correiosContracts[contractIndex].username = username;
+    if (contractNumber) db.correiosContracts[contractIndex].contractNumber = contractNumber;
+    if (isActive !== undefined) db.correiosContracts[contractIndex].isActive = isActive;
+
+    // Se enviou novo token, criptografar e atualizar
+    if (accessToken) {
+      db.correiosContracts[contractIndex].accessToken = encryptToken(accessToken);
+    }
+
+    db.correiosContracts[contractIndex].updatedAt = new Date().toISOString();
+
+    writeDB(db);
+
+    // Retornar sem o token
+    const { accessToken: _, ...safeContract } = db.correiosContracts[contractIndex];
+
+    res.json({
+      success: true,
+      message: 'Contrato atualizado com sucesso!',
+      contract: safeContract
+    });
+  } catch (error) {
+    console.error('Erro ao editar contrato:', error);
+    res.status(500).json({ error: 'Erro ao editar contrato' });
+  }
+});
+
+// 4. Deletar contrato
+app.delete('/api/correios-contracts/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const db = readDB();
+    const initialLength = db.correiosContracts.length;
+    db.correiosContracts = db.correiosContracts.filter(c => c.id !== id);
+
+    if (db.correiosContracts.length === initialLength) {
+      return res.status(404).json({ error: 'Contrato não encontrado' });
+    }
+
+    writeDB(db);
+
+    res.json({
+      success: true,
+      message: 'Contrato deletado com sucesso!'
+    });
+  } catch (error) {
+    console.error('Erro ao deletar contrato:', error);
+    res.status(500).json({ error: 'Erro ao deletar contrato' });
+  }
+});
+
+// 5. Testar contrato
+app.post('/api/correios-contracts/:id/test', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { trackingCode } = req.body;
+
+    if (!trackingCode) {
+      return res.status(400).json({ error: 'Código de rastreio é obrigatório' });
+    }
+
+    const db = readDB();
+    const contract = db.correiosContracts.find(c => c.id === id);
+
+    if (!contract) {
+      return res.status(404).json({ error: 'Contrato não encontrado' });
+    }
+
+    // Descriptografar o token
+    const decryptedToken = decryptToken(contract.accessToken);
+
+    console.log(`🔄 Testando contrato: ${contract.name}`);
+
+    // Tentar buscar rastreio com este contrato
+    try {
+      const response = await axios.post(
+        'https://webservice.correios.com.br/service/rest/rastro/rastroMobile',
+        `usuario=${contract.username}&senha=${decryptedToken}&tipo=L&resultado=T&objetos=${trackingCode}`,
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'Dart/2.19 (dart:io)',
+            'Accept': 'application/xml'
+          },
+          timeout: 10000
+        }
+      );
+
+      if (response.data && response.data.includes('<objeto>')) {
+        const trackingData = parseCorreiosXML(response.data, trackingCode);
+
+        // Atualizar status do teste
+        const contractIndex = db.correiosContracts.findIndex(c => c.id === id);
+        db.correiosContracts[contractIndex].lastTestedAt = new Date().toISOString();
+        db.correiosContracts[contractIndex].lastTestStatus = 'success';
+        db.correiosContracts[contractIndex].lastTestMessage = `${trackingData.quantidade} eventos encontrados`;
+        writeDB(db);
+
+        console.log(`✅ Teste bem-sucedido: ${contract.name}`);
+
+        return res.json({
+          success: true,
+          message: 'Contrato funcionando corretamente!',
+          eventsCount: trackingData.quantidade,
+          eventos: trackingData.eventos
+        });
+      } else {
+        throw new Error('Resposta XML inválida');
+      }
+    } catch (error) {
+      // Atualizar status do teste como falha
+      const contractIndex = db.correiosContracts.findIndex(c => c.id === id);
+      db.correiosContracts[contractIndex].lastTestedAt = new Date().toISOString();
+      db.correiosContracts[contractIndex].lastTestStatus = 'failed';
+      db.correiosContracts[contractIndex].lastTestMessage = error.message;
+      writeDB(db);
+
+      console.log(`❌ Teste falhou: ${contract.name} - ${error.message}`);
+
+      return res.status(400).json({
+        success: false,
+        message: 'Falha ao buscar rastreio',
+        error: error.response?.status === 401 ? 'Unauthorized (401)' : error.message,
+        suggestions: [
+          'Verifique se as credenciais estão corretas',
+          'Confirme se o código pertence a este contrato',
+          'Verifique se o contrato está ativo nos Correios'
+        ]
+      });
+    }
+  } catch (error) {
+    console.error('Erro ao testar contrato:', error);
+    res.status(500).json({ error: 'Erro ao testar contrato' });
+  }
+});
+
+// ============================================
+// ENDPOINT - RASTREIO DOS CORREIOS (ATUALIZADO)
+// ============================================
+
+// Endpoint para buscar rastreio dos Correios
+app.get('/api/orders/:orderId/correios-tracking', async (req, res) => {
+  try {
+    const db = readDB();
+    const order = db.orders.find(o => o.id === req.params.orderId);
+
+    if (!order) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    if (!order.trackingCode) {
+      return res.status(400).json({ error: 'Pedido não possui código de rastreio' });
+    }
+
+    // Buscar o produto para obter o producerId (userId do vendedor)
+    const product = db.products.find(p => p.id === order.productId);
+    if (!product) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+
+    const userId = product.producerId; // ID do usuário vendedor (dono do produto)
+    const trackingCode = order.trackingCode;
+
+    // Verificar se existe no cache e ainda está válido
+    const cached = trackingCache.get(trackingCode);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+      console.log(`📦 Rastreio do cache: ${trackingCode}`);
+      return res.json(cached.data);
+    }
+
+    console.log(`🔍 Buscando rastreio nos Correios: ${trackingCode}`);
+
+    // Buscar rastreio nos Correios usando contratos do usuário
+    const trackingData = await fetchCorreiosTracking(trackingCode, userId);
+
+    if (!trackingData || !trackingData.eventos || trackingData.eventos.length === 0) {
+      return res.status(404).json({
+        error: 'Rastreio não encontrado',
+        message: 'Não foi possível obter informações de rastreio dos Correios. Verifique se você possui contratos dos Correios cadastrados em Configurações > Integrações > Correios.'
+      });
+    }
+
+    // Formatar resposta
+    const formattedEvents = trackingData.eventos.map(evento => {
+      return {
+        date: evento.data || new Date().toISOString(),
+        location: evento.local || '',
+        status: evento.status || '',
+        description: evento.subStatus?.[0] || evento.status || ''
+      };
+    });
+
+    // Determinar status geral
+    let generalStatus = 'Em processamento';
+    const lastEvent = trackingData.eventos[0];
+    if (lastEvent && lastEvent.status) {
+      const statusLower = lastEvent.status.toLowerCase();
+      if (statusLower.includes('entregue')) {
+        generalStatus = 'Entregue';
+      } else if (statusLower.includes('trânsito') || statusLower.includes('transito')) {
+        generalStatus = 'Em trânsito';
+      } else if (statusLower.includes('postado')) {
+        generalStatus = 'Postado';
+      } else if (statusLower.includes('saiu para entrega')) {
+        generalStatus = 'Saiu para entrega';
+      }
+    }
+
+    const response = {
+      trackingCode: trackingCode,
+      status: generalStatus,
+      lastUpdate: formattedEvents[0]?.date || new Date().toISOString(),
+      events: formattedEvents
+    };
+
+    // Salvar no cache
+    trackingCache.set(trackingCode, {
+      data: response,
+      timestamp: Date.now()
+    });
+
+    console.log(`✅ Rastreio obtido com sucesso: ${formattedEvents.length} eventos`);
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('❌ Erro ao buscar rastreio dos Correios:', error);
+    res.status(500).json({
+      error: 'Erro ao buscar rastreio',
+      message: error.message || 'Erro interno ao consultar os Correios. Tente novamente mais tarde.'
+    });
+  }
+});
+
+app.patch('/api/orders/:id', (req, res) => {
+  const db = readDB();
+  const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  const {
+    status,
+    trackingCode,
+    paymentStatus,
+    shippingInfo,
+    carrier,
+    estimatedDelivery
+  } = req.body;
+
+  // Atualizar informações de envio
+  if (trackingCode || carrier || estimatedDelivery) {
+    db.orders[orderIndex].shippingInfo = {
+      ...db.orders[orderIndex].shippingInfo,
+      ...(trackingCode && { trackingCode }),
+      ...(carrier && { carrier }),
+      ...(estimatedDelivery && { estimatedDelivery }),
+      ...(trackingCode && { shippingStatus: 'shipped', shippingDate: new Date().toISOString() })
+    };
+  }
+
+  db.orders[orderIndex] = {
+    ...db.orders[orderIndex],
+    ...(status && { status }),
+    ...(trackingCode && { trackingCode }),
+    ...(paymentStatus && { paymentStatus }),
+    ...(shippingInfo && { shippingInfo: { ...db.orders[orderIndex].shippingInfo, ...shippingInfo } }),
+    updatedAt: new Date().toISOString(),
+    ...(status === 'paid' && { paidAt: new Date().toISOString() })
+  };
+
+  // Atualizar status de comissão se pedido foi pago
+  if (status === 'paid' || paymentStatus === 'paid') {
+    const commissionIndex = db.commissions.findIndex(c => c.orderId === req.params.id);
+    if (commissionIndex !== -1) {
+      db.commissions[commissionIndex].status = 'paid';
+      db.commissions[commissionIndex].paidAt = new Date().toISOString();
+    }
+  }
+
+  writeDB(db);
+
+  // Disparar webhooks baseados nas mudanças
+  const pedidoAtualizado = db.orders[orderIndex];
+
+  // Pagamento aprovado
+  if (paymentStatus === 'paid') {
+    dispararWebhookPortugues(pedidoAtualizado.producerId, 'pagamentoAprovado', pedidoAtualizado);
+
+    // Enviar automaticamente para Notazz se configurado
+    const notazzConfig = db.notazzConfigs?.find(c => c.userId === pedidoAtualizado.producerId);
+    if (notazzConfig && notazzConfig.enabled && notazzConfig.autoSend) {
+      console.log(`🚀 Enviando pedido ${pedidoAtualizado.id} (PAGO) automaticamente para Notazz...`);
+      enviarPedidoNotazz(pedidoAtualizado.id, pedidoAtualizado.producerId);
+    }
+  }
+
+  // Pedido agendado (AfterPay)
+  if (paymentStatus === 'scheduled') {
+    dispararWebhookPortugues(pedidoAtualizado.producerId, 'agendado', pedidoAtualizado);
+
+    // Enviar automaticamente para Notazz se configurado
+    const notazzConfig = db.notazzConfigs?.find(c => c.userId === pedidoAtualizado.producerId);
+    if (notazzConfig && notazzConfig.enabled && notazzConfig.autoSend) {
+      console.log(`🚀 Enviando pedido ${pedidoAtualizado.id} (AGENDADO) automaticamente para Notazz...`);
+      enviarPedidoNotazz(pedidoAtualizado.id, pedidoAtualizado.producerId);
+    }
+  }
+
+  // Código de rastreio adicionado
+  if (trackingCode) {
+    dispararWebhookPortugues(pedidoAtualizado.producerId, 'codigoRastreio', pedidoAtualizado);
+  }
+
+  // Status de entrega
+  if (shippingInfo?.shippingStatus === 'shipped' || trackingCode) {
+    dispararWebhookPortugues(pedidoAtualizado.producerId, 'saiuParaEntrega', pedidoAtualizado);
+  }
+
+  // Pedido cancelado
+  if (paymentStatus === 'cancelled') {
+    dispararWebhookPortugues(pedidoAtualizado.producerId, 'cancelada', pedidoAtualizado);
+  }
+
+  res.json(db.orders[orderIndex]);
+});
+
+// ============ ROTAS DE WEBHOOKS ============
+
+// Listar webhooks do usuário
+app.get('/api/webhooks', (req, res) => {
+  const db = readDB();
+  const { userId } = req.query;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId é obrigatório' });
+  }
+
+  const webhooks = db.webhooks?.filter(w => w.userId === userId) || [];
+  res.json(webhooks);
+});
+
+// Criar novo webhook
+app.post('/api/webhooks', (req, res) => {
+  const db = readDB();
+  const { userId, name, url, product, events } = req.body;
+
+  if (!userId || !name || !url) {
+    return res.status(400).json({ error: 'userId, name e url são obrigatórios' });
+  }
+
+  if (!db.webhooks) {
+    db.webhooks = [];
+  }
+
+  const novoWebhook = {
+    id: uuidv4(),
+    userId,
+    code: `cowxj${Math.random().toString(36).substring(2, 5)}`,
+    name,
+    url,
+    product: product || '',
+    status: true,
+    events: events || {
+      aguardandoPagamento: true,
+      pagamentoAprovado: false,
+      cancelada: false,
+      agendado: false,
+      frustrada: false,
+      codigoRastreio: false,
+      pedidoEntregue: false,
+      saiuParaEntrega: false,
+      aguardandoRetirada: false
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  db.webhooks.push(novoWebhook);
+  writeDB(db);
+
+  console.log(`✅ Webhook criado: ${name} (${novoWebhook.id})`);
+  res.json({ success: true, webhook: novoWebhook });
+});
+
+// Atualizar webhook
+app.put('/api/webhooks/:id', (req, res) => {
+  const db = readDB();
+  const { id } = req.params;
+  const { name, url, product, status, events } = req.body;
+
+  if (!db.webhooks) {
+    return res.status(404).json({ error: 'Nenhum webhook encontrado' });
+  }
+
+  const webhookIndex = db.webhooks.findIndex(w => w.id === id);
+
+  if (webhookIndex === -1) {
+    return res.status(404).json({ error: 'Webhook não encontrado' });
+  }
+
+  // Atualizar campos
+  if (name !== undefined) db.webhooks[webhookIndex].name = name;
+  if (url !== undefined) db.webhooks[webhookIndex].url = url;
+  if (product !== undefined) db.webhooks[webhookIndex].product = product;
+  if (status !== undefined) db.webhooks[webhookIndex].status = status;
+  if (events !== undefined) db.webhooks[webhookIndex].events = events;
+  db.webhooks[webhookIndex].updatedAt = new Date().toISOString();
+
+  writeDB(db);
+
+  console.log(`✅ Webhook atualizado: ${db.webhooks[webhookIndex].name}`);
+  res.json({ success: true, webhook: db.webhooks[webhookIndex] });
+});
+
+// Deletar webhook
+app.delete('/api/webhooks/:id', (req, res) => {
+  const db = readDB();
+  const { id } = req.params;
+
+  if (!db.webhooks) {
+    return res.status(404).json({ error: 'Nenhum webhook encontrado' });
+  }
+
+  const webhookIndex = db.webhooks.findIndex(w => w.id === id);
+
+  if (webhookIndex === -1) {
+    return res.status(404).json({ error: 'Webhook não encontrado' });
+  }
+
+  const deletedWebhook = db.webhooks[webhookIndex];
+  db.webhooks.splice(webhookIndex, 1);
+  writeDB(db);
+
+  console.log(`🗑️ Webhook deletado: ${deletedWebhook.name}`);
+  res.json({ success: true, message: 'Webhook deletado com sucesso' });
+});
+
+// Testar webhook (enviar manualmente)
+app.post('/api/webhooks/:id/test', (req, res) => {
+  const db = readDB();
+  const { id } = req.params;
+
+  if (!db.webhooks) {
+    return res.status(404).json({ error: 'Nenhum webhook encontrado' });
+  }
+
+  const webhook = db.webhooks.find(w => w.id === id);
+
+  if (!webhook) {
+    return res.status(404).json({ error: 'Webhook não encontrado' });
+  }
+
+  // Criar payload de teste
+  const payloadTeste = {
+    evento: 'teste',
+    data_hora: new Date().toISOString(),
+    mensagem: 'Este é um webhook de teste enviado manualmente',
+    webhook: {
+      id: webhook.id,
+      nome: webhook.name,
+      codigo: webhook.code
+    }
+  };
+
+  console.log(`🧪 Teste de webhook: ${webhook.name}`);
+  console.log(`📤 Enviando para: ${webhook.url}`);
+  console.log(`📦 Payload:`, JSON.stringify(payloadTeste, null, 2));
+
+  // Salvar log do teste
+  if (!db.webhookLogs) {
+    db.webhookLogs = [];
+  }
+
+  db.webhookLogs.push({
+    id: uuidv4(),
+    webhookId: webhook.id,
+    webhookName: webhook.name,
+    url: webhook.url,
+    evento: 'teste',
+    payload: payloadTeste,
+    sucesso: true,
+    dataHora: new Date().toISOString(),
+    resposta: 'Webhook de teste enviado com sucesso (simulado)'
+  });
+
+  writeDB(db);
+
+  res.json({
+    success: true,
+    message: 'Webhook de teste enviado com sucesso',
+    payload: payloadTeste
+  });
+});
+
+// Obter logs de webhooks
+app.get('/api/webhooks/:id/logs', (req, res) => {
+  const db = readDB();
+  const { id } = req.params;
+  const { limit = 50 } = req.query;
+
+  const logs = db.webhookLogs?.filter(log => log.webhookId === id) || [];
+
+  // Ordenar por data (mais recentes primeiro) e limitar
+  const logsOrdenados = logs
+    .sort((a, b) => new Date(b.dataHora) - new Date(a.dataHora))
+    .slice(0, parseInt(limit));
+
+  res.json(logsOrdenados);
+});
+
+// ============ ROTAS DE INTEGRAÇÃO NOTAZZ ============
+
+// Buscar configuração Notazz do usuário
+app.get('/api/integrations/notazz', (req, res) => {
+  const db = readDB();
+  const { userId } = req.query;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId é obrigatório' });
+  }
+
+  const config = db.notazzConfigs?.find(c => c.userId === userId);
+
+  if (config) {
+    res.json({
+      webhookId: config.webhookId || '',
+      enabled: config.enabled,
+      autoSend: config.autoSend
+    });
+  } else {
+    res.json({
+      webhookId: '',
+      enabled: false,
+      autoSend: false
+    });
+  }
+});
+
+// ========== ENDPOINT DE DIAGNÓSTICO NOTAZZ ==========
+app.get('/api/integrations/notazz/logs', (req, res) => {
+  const db = readDB();
+  const { userId, orderId, limit = 20 } = req.query;
+
+  let logs = db.notazzLogs || [];
+
+  // Filtrar por userId se fornecido
+  if (userId) {
+    logs = logs.filter(log => log.userId === userId);
+  }
+
+  // Filtrar por orderId se fornecido
+  if (orderId) {
+    logs = logs.filter(log => log.orderId === orderId);
+  }
+
+  // Ordenar por data (mais recente primeiro)
+  logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  // Limitar quantidade
+  logs = logs.slice(0, parseInt(limit));
+
+  res.json({
+    total: logs.length,
+    logs: logs.map(log => ({
+      ...log,
+      timestamp: log.timestamp,
+      success: log.success,
+      statusCode: log.statusCode,
+      orderId: log.orderId,
+      responsePreview: JSON.stringify(log.response).substring(0, 200)
+    }))
+  });
+});
+
+// ========== DIAGNÓSTICO: Últimos pedidos criados ==========
+app.get('/api/debug/recent-orders', (req, res) => {
+  const db = readDB();
+  const limit = parseInt(req.query.limit) || 5;
+
+  const recentOrders = db.orders
+    .slice(-limit)
+    .map(order => ({
+      id: order.id,
+      createdAt: order.createdAt,
+      customerName: order.customer?.name,
+      customerCPF: order.customer?.cpf,
+      customerEmail: order.customer?.email,
+      productName: order.productName,
+      totalValue: order.totalValue,
+      paymentMethod: order.paymentMethod,
+      sentToNotazz: order.sentToNotazz || false,
+      sentToNotazzAt: order.sentToNotazzAt || null
+    }));
+
+  res.json({
+    total: db.orders.length,
+    recent: recentOrders
+  });
+});
+
+// ========== SUPER DIAGNÓSTICO: Comparar Banco vs Notazz ==========
+app.get('/api/debug/super-diagnostic', (req, res) => {
+  const db = readDB();
+  const limit = parseInt(req.query.limit) || 3;
+
+  // Buscar últimos pedidos
+  const lastOrders = db.orders.slice(-limit);
+
+  // Buscar logs correspondentes do Notazz
+  const diagnostic = lastOrders.map(order => {
+    const notazzLog = db.notazzLogs?.find(log => log.orderId === order.id);
+
+    return {
+      pedidoId: order.id,
+      criadoEm: order.createdAt,
+
+      // DADOS SALVOS NO BANCO
+      dadosBanco: {
+        nomeCliente: order.customer?.name,
+        cpf: order.customer?.cpf,
+        email: order.customer?.email,
+        telefone: order.customer?.phone,
+        endereco: {
+          rua: order.shippingAddress?.address || order.shippingAddress?.street,
+          numero: order.shippingAddress?.number,
+          bairro: order.shippingAddress?.neighborhood || order.shippingAddress?.district,
+          cidade: order.shippingAddress?.city,
+          estado: order.shippingAddress?.state,
+          cep: order.shippingAddress?.zipCode || order.shippingAddress?.cep
+        },
+        produto: order.productName,
+        valorTotal: order.totalValue,
+        metodoPagamento: order.paymentMethod
+      },
+
+      // DADOS ENVIADOS AO NOTAZZ
+      dadosEnviadosNotazz: notazzLog ? {
+        id: notazzLog.payload?.id,
+        customer_name: notazzLog.payload?.customer_name,
+        customer_email: notazzLog.payload?.customer_email,
+        customer_doc: notazzLog.payload?.customer_doc,
+        customer_phone: notazzLog.payload?.customer_phone,
+        customer_street: notazzLog.payload?.customer_street,
+        customer_number: notazzLog.payload?.customer_number,
+        customer_city: notazzLog.payload?.customer_city,
+        customer_state: notazzLog.payload?.customer_state,
+        customer_zipcode: notazzLog.payload?.customer_zipcode,
+        product: notazzLog.payload?.product,
+        total: notazzLog.payload?.total,
+        statusHTTP: notazzLog.statusCode,
+        enviadoEm: notazzLog.timestamp
+      } : null,
+
+      // ANÁLISE
+      foiEnviadoNotazz: !!notazzLog,
+      comparacao: notazzLog ? {
+        nomeIgual: order.customer?.name === notazzLog.payload?.customer_name,
+        valorIgual: parseFloat(order.totalValue) === parseFloat(notazzLog.payload?.total || 0)
+      } : null
+    };
+  });
+
+  res.json({
+    totalPedidos: db.orders.length,
+    totalLogsNotazz: db.notazzLogs?.length || 0,
+    ultimos: diagnostic,
+    analiseGeral: {
+      todosEnviados: diagnostic.every(d => d.foiEnviadoNotazz),
+      algumComDivergencia: diagnostic.some(d =>
+        d.comparacao && (!d.comparacao.nomeIgual || !d.comparacao.valorIgual)
+      )
+    }
+  });
+});
+
+// ========== CONSULTAR NOTA NO NOTAZZ (por order ID) ==========
+app.get('/api/integrations/notazz/check-note/:orderId', async (req, res) => {
+  const { orderId } = req.params;
+  const { userId } = req.query;
+
+  const db = readDB();
+
+  // Buscar log do envio
+  const log = db.notazzLogs?.find(log => log.orderId === orderId);
+
+  if (!log) {
+    return res.json({
+      found: false,
+      message: 'Nenhum log de envio encontrado para este pedido',
+      hint: 'O pedido pode não ter sido enviado ao Notazz ainda'
+    });
+  }
+
+  res.json({
+    found: true,
+    orderId: orderId,
+    enviado: log.timestamp,
+    sucesso: log.success,
+    statusHTTP: log.statusCode,
+    respostaNotazz: log.response,
+    payloadEnviado: log.payload,
+    analise: {
+      statusHTTP: log.statusCode === 201 || log.statusCode === 200
+        ? '✅ Requisição aceita pelo Notazz'
+        : '❌ Requisição rejeitada',
+      temIdNota: log.response?.id ? `✅ ID da nota: ${log.response.id}` : '⚠️ Resposta não contém ID da nota',
+      statusProcessamento: log.response?.statusProcessamento || 'Não informado',
+      codigoProcessamento: log.response?.codigoProcessamento || 'Não informado',
+      possivelCausa: !log.response?.id
+        ? 'Nota pode estar em rascunho ou aguardando aprovação no painel Notazz'
+        : 'Nota foi criada. Verifique painel Notazz filtrando por data/CPF'
+    }
+  });
+});
+
+// ========== TESTE DE PAYLOAD MÍNIMO ==========
+app.post('/api/integrations/notazz/test-minimal', async (req, res) => {
+  const db = readDB();
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId é obrigatório' });
+  }
+
+  // Buscar configuração do Notazz
+  const notazzConfig = db.notazzConfigs?.find(c => c.userId === userId);
+
+  if (!notazzConfig || !notazzConfig.webhookId) {
+    return res.status(400).json({ error: 'Configuração Notazz não encontrada' });
+  }
+
+  console.log('\n🧪 ========== TESTE DE PAYLOAD MÍNIMO ==========');
+
+  try {
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const testId = `TEST-${timestamp}`;
+    const uniqueId = `${testId}-${randomSuffix}`;  // ID completamente único
+
+    // Payload webhook IGUAL ao usado no envio real (formato padrão de integrações bem-sucedidas)
+    const minimalPayload = {
+      // ========== IDENTIFICAÇÃO ÚNICA ==========
+      id: uniqueId,  // ID completamente único com timestamp + random
+      status: 'paid',
+      date: new Date().toISOString(),
+
+      // ========== CLIENTE (formato webhook: customer_* sem "address_") ==========
+      customer_name: `Cliente Teste ${timestamp}`,  // Nome único
+      customer_email: `teste-${timestamp}@email.com`,  // Email único
+      customer_doc: '12345678901',
+      customer_phone: '81987654321',
+      customer_street: 'Rua Teste',  // customer_street (não customer_address_street)
+      customer_number: '123',
+      customer_complement: '',
+      customer_district: 'Centro',
+      customer_city: 'Recife',
+      customer_state: 'PE',
+      customer_zipcode: '50000000',
+      customer_country: 'BR',
+
+      // ========== PRODUTOS ==========
+      product: [{
+        id: '1',
+        name: 'Produto Teste',
+        amount: '1',
+        unitary_value: '100.00'
+      }],
+
+      // ========== VALORES ==========
+      total: '100.00',
+      currency: 'BRL',
+
+      // ========== INFORMAÇÕES ADICIONAIS ==========
+      payment_method: 'afterPay',
+      request_origin: 'Pag2 Pay',  // FIXO - NÃO PODE MUDAR!
+
+      // ========== DADOS DO PRODUTOR ==========
+      producer_name: 'Pag2 Pay',
+      producer_doc: '',
+      producer_email: ''
+    };
+
+    const notazzUrl = `https://app.notazz.com/webhook/${notazzConfig.webhookId}`;
+
+    console.log('🌐 URL:', notazzUrl);
+    console.log('📦 Payload Mínimo:', JSON.stringify(minimalPayload, null, 2));
+
+    const response = await fetch(notazzUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(minimalPayload)
+    });
+
+    console.log('📥 Status HTTP:', response.status);
+    console.log('📥 Headers:', Object.fromEntries(response.headers.entries()));
+
+    const text = await response.text();
+    console.log('📥 Body (texto bruto):', text);
+
+    let data;
+    try {
+      data = JSON.parse(text);
+      console.log('📥 JSON parseado:', JSON.stringify(data, null, 2));
+    } catch {
+      console.log('⚠️ Resposta não é JSON');
+      data = { raw: text };
+    }
+
+    console.log('===========================================\n');
+
+    res.json({
+      status: response.status,
+      ok: response.ok,
+      headers: Object.fromEntries(response.headers.entries()),
+      data
+    });
+  } catch (error) {
+    console.error('❌ Erro no teste:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Salvar configuração Notazz
+app.post('/api/integrations/notazz', (req, res) => {
+  console.log('\n📝 Recebendo requisição para salvar configuração Notazz...');
+  console.log('Body recebido:', req.body);
+
+  const db = readDB();
+  const { userId, webhookId, apiKey, enabled, autoSend } = req.body;
+
+  console.log('Dados extraídos:', { userId, webhookId, apiKey: apiKey ? '***' : 'não fornecida', enabled, autoSend });
+
+  if (!userId) {
+    console.log('❌ Erro: userId ausente');
+    return res.status(400).json({ error: 'userId é obrigatório' });
+  }
+
+  // Aceitar webhookId OU apiKey (pelo menos um)
+  if (!webhookId && !apiKey) {
+    console.log('❌ Erro: Nem webhookId nem apiKey fornecidos');
+    return res.status(400).json({ error: 'webhookId ou apiKey é obrigatório' });
+  }
+
+  if (!db.notazzConfigs) {
+    console.log('⚠️ Array notazzConfigs não existe, criando...');
+    db.notazzConfigs = [];
+  }
+
+  const existingIndex = db.notazzConfigs.findIndex(c => c.userId === userId);
+  console.log(`Configuração existente? ${existingIndex !== -1 ? `Sim (índice ${existingIndex})` : 'Não'}`);
+
+  const config = {
+    userId,
+    webhookId: webhookId || '',
+    apiKey: apiKey || '',
+    enabled: enabled || false,
+    autoSend: autoSend || false,
+    updatedAt: new Date().toISOString()
+  };
+
+  console.log('Configuração a ser salva:', { ...config, apiKey: config.apiKey ? '***OCULTA***' : '' });
+
+  if (existingIndex !== -1) {
+    db.notazzConfigs[existingIndex] = config;
+  } else {
+    db.notazzConfigs.push(config);
+  }
+
+  writeDB(db);
+
+  console.log(`✅ Configuração Notazz ${existingIndex !== -1 ? 'atualizada' : 'criada'} para usuário ${userId}`);
+  console.log(`📊 Total de configurações Notazz no banco: ${db.notazzConfigs.length}`);
+
+  res.json({ success: true, config });
+});
+
+// Enviar pedido para o Notazz (gerar nota)
+app.post('/api/integrations/notazz/send-order', async (req, res) => {
+  const db = readDB();
+  const { orderId, userId } = req.body;
+
+  if (!orderId || !userId) {
+    return res.status(400).json({ error: 'orderId e userId são obrigatórios' });
+  }
+
+  // Buscar configuração do Notazz
+  const notazzConfig = db.notazzConfigs?.find(c => c.userId === userId);
+
+  if (!notazzConfig || !notazzConfig.enabled) {
+    return res.status(400).json({ error: 'Integração Notazz não está ativada' });
+  }
+
+  // Buscar pedido
+  const order = db.orders.find(o => o.id === orderId);
+
+  if (!order) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  try {
+    // Preparar payload para o Notazz
+    const notazzPayload = {
+      order_id: order.id,
+      order_number: order.orderNumber || order.id,
+      product_name: order.productName,
+      product_price: order.productPrice,
+      quantity: order.quantity,
+      total_value: order.totalValue,
+      customer: {
+        name: order.customer?.name || '',
+        email: order.customer?.email || '',
+        phone: order.customer?.phone || '',
+        cpf: order.customer?.cpf || '',
+        address: order.customer?.address || '',
+        number: order.customer?.number || '',
+        complement: order.customer?.complement || '',
+        neighborhood: order.customer?.neighborhood || '',
+        city: order.customer?.city || '',
+        state: order.customer?.state || '',
+        zipcode: order.customer?.zipCode || ''
+      },
+      payment_status: order.paymentStatus,
+      created_at: order.createdAt
+    };
+
+    console.log(`\n📤 Enviando pedido ${orderId} para Notazz...`);
+    console.log(`🔑 Token: ${notazzConfig.token.substring(0, 10)}...`);
+
+    // Enviar para Notazz (simulado - substitua pela URL real da API Notazz)
+    const notazzResponse = await fetch('https://api.notazz.com.br/v1/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${notazzConfig.token}`
+      },
+      body: JSON.stringify(notazzPayload)
+    });
+
+    const notazzData = await notazzResponse.json();
+
+    // Salvar log do envio
+    if (!db.notazzLogs) {
+      db.notazzLogs = [];
+    }
+
+    db.notazzLogs.push({
+      id: uuidv4(),
+      orderId: orderId,
+      userId: userId,
+      success: notazzResponse.ok,
+      statusCode: notazzResponse.status,
+      payload: notazzPayload,
+      response: notazzData,
+      timestamp: new Date().toISOString()
+    });
+
+    writeDB(db);
+
+    if (notazzResponse.ok) {
+      console.log(`✅ Pedido enviado com sucesso ao Notazz`);
+      console.log(`📋 Resposta:`, notazzData);
+
+      res.json({
+        success: true,
+        message: 'Pedido enviado para Notazz com sucesso',
+        notazzResponse: notazzData
+      });
+    } else {
+      console.log(`⚠️ Erro ao enviar pedido ao Notazz: ${notazzResponse.status}`);
+      res.status(notazzResponse.status).json({
+        success: false,
+        error: 'Erro ao enviar pedido para Notazz',
+        details: notazzData
+      });
+    }
+  } catch (error) {
+    console.error(`❌ Erro ao enviar pedido para Notazz:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao comunicar com Notazz',
+      details: error.message
+    });
+  }
+});
+
+// Webhook para receber código de rastreio do Notazz
+// 📦 WEBHOOK NOTAZZ - Receber rastreio disponível
+app.post('/api/integrations/notazz/tracking-webhook', (req, res) => {
+  const db = readDB();
+  const payload = req.body;
+
+  console.log(`\n📥 ========== WEBHOOK NOTAZZ RECEBIDO ==========`);
+  console.log(`📦 Payload completo:`, JSON.stringify(payload, null, 2));
+
+  // Extrair dados do payload do Notazz
+  const {
+    external_id,        // ID do pedido na plataforma
+    rastreio_externo,   // Código de rastreio dos Correios
+    rastreio,           // URL de rastreio do Notazz
+    numero,             // Número da nota fiscal
+    chave,              // Chave da nota fiscal
+    pdf,                // URL do PDF da nota fiscal
+    xml,                // URL do XML da nota fiscal
+    statusNota,         // Status da nota (ex: "Autorizada")
+    emissao,            // Data de emissão
+    rastro              // Array com histórico de rastreamento
+  } = payload;
+
+  console.log(`\n📋 Dados extraídos:`);
+  console.log(`   🆔 External ID (Pedido): ${external_id}`);
+  console.log(`   📦 Rastreio Externo (Correios): ${rastreio_externo}`);
+  console.log(`   🔗 URL Rastreio Notazz: ${rastreio}`);
+  console.log(`   🧾 Nota Fiscal: ${numero}`);
+  console.log(`   📄 PDF: ${pdf}`);
+  console.log(`   📊 Status: ${statusNota}`);
+
+  // Validar dados obrigatórios
+  if (!external_id) {
+    console.log(`❌ ERRO: external_id não fornecido`);
+    return res.status(400).json({
+      error: 'external_id é obrigatório',
+      received: payload
+    });
+  }
+
+  // Buscar pedido pelo external_id
+  const orderIndex = db.orders.findIndex(o => o.id === external_id);
+
+  if (orderIndex === -1) {
+    console.log(`❌ ERRO: Pedido ${external_id} não encontrado no banco de dados`);
+    console.log(`📋 Pedidos disponíveis: ${db.orders.map(o => o.id).join(', ')}`);
+    return res.status(404).json({
+      error: 'Pedido não encontrado',
+      external_id: external_id,
+      available_orders: db.orders.map(o => ({ id: o.id, productName: o.productName }))
+    });
+  }
+
+  const order = db.orders[orderIndex];
+  console.log(`\n✅ Pedido encontrado: ${order.id} - ${order.productName}`);
+
+  // Atualizar pedido com informações do Notazz
+  if (rastreio_externo) {
+    db.orders[orderIndex].trackingCode = rastreio_externo;
+    console.log(`   📦 Código de rastreio adicionado: ${rastreio_externo}`);
+  }
+
+  if (rastreio) {
+    db.orders[orderIndex].trackingUrl = rastreio;
+    console.log(`   🔗 URL de rastreio Notazz adicionada`);
+  }
+
+  if (numero) {
+    db.orders[orderIndex].notaFiscalNumber = numero;
+    console.log(`   🧾 Número da NF adicionado: ${numero}`);
+  }
+
+  if (chave) {
+    db.orders[orderIndex].notaFiscalKey = chave;
+    console.log(`   🔑 Chave da NF adicionada`);
+  }
+
+  if (pdf) {
+    db.orders[orderIndex].notaFiscalPdfUrl = pdf;
+    console.log(`   📄 PDF da NF adicionado`);
+  }
+
+  if (xml) {
+    db.orders[orderIndex].notaFiscalXmlUrl = xml;
+    console.log(`   📊 XML da NF adicionado`);
+  }
+
+  if (emissao) {
+    db.orders[orderIndex].notaFiscalEmissao = emissao;
+    console.log(`   📅 Data de emissão: ${emissao}`);
+  }
+
+  db.orders[orderIndex].notazzWebhookReceivedAt = new Date().toISOString();
+  db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+  // Atualizar informações de envio
+  if (!db.orders[orderIndex].shippingInfo) {
+    db.orders[orderIndex].shippingInfo = {};
+  }
+
+  if (rastreio_externo) {
+    db.orders[orderIndex].shippingInfo.shippingStatus = 'shipped';
+    db.orders[orderIndex].shippingInfo.shippingDate = new Date().toISOString();
+    db.orders[orderIndex].shippingInfo.carrier = 'Correios';
+  }
+
+  // Salvar histórico de rastreamento do Notazz (se disponível)
+  if (rastro && Array.isArray(rastro) && rastro.length > 0) {
+    if (!db.orders[orderIndex].trackingHistory) {
+      db.orders[orderIndex].trackingHistory = [];
+    }
+
+    // Adicionar eventos do rastro
+    rastro.forEach((evento, index) => {
+      if (evento.descricao && evento.descricao.trim()) {
+        const trackingEvent = {
+          id: uuidv4(),
+          status: 'Atualização',
+          location: '',
+          date: evento.data || new Date().toISOString(),
+          description: evento.descricao,
+          receivedAt: new Date().toISOString(),
+          source: 'notazz_webhook'
+        };
+
+        // Adicionar no início (mais recente primeiro)
+        db.orders[orderIndex].trackingHistory.unshift(trackingEvent);
+        console.log(`   📍 Evento ${index + 1}: ${evento.descricao}`);
+      }
+    });
+  }
+
+  writeDB(db);
+
+  console.log(`\n✅ ========== WEBHOOK PROCESSADO COM SUCESSO ==========`);
+  console.log(`📦 Pedido ${external_id} atualizado com sucesso!`);
+
+  if (rastreio_externo) {
+    console.log(`📮 Código de rastreio: ${rastreio_externo}`);
+  }
+
+  // Disparar webhook interno de código de rastreio (se houver)
+  if (rastreio_externo) {
+    dispararWebhookPortugues(order.producerId, 'codigoRastreio', db.orders[orderIndex]);
+  }
+
+  // Disparar webhook de nota fiscal autorizada (se houver)
+  if (numero && statusNota === 'Autorizada') {
+    dispararWebhookPortugues(order.producerId, 'notaFiscalAutorizada', db.orders[orderIndex]);
+  }
+
+  res.json({
+    success: true,
+    message: 'Webhook Notazz processado com sucesso',
+    order_id: external_id,
+    tracking_code: rastreio_externo,
+    nota_fiscal: numero,
+    updated_fields: {
+      trackingCode: !!rastreio_externo,
+      trackingUrl: !!rastreio,
+      notaFiscalNumber: !!numero,
+      notaFiscalPdf: !!pdf,
+      trackingHistory: rastro?.length || 0
+    }
+  });
+});
+
+// 🔍 DIAGNÓSTICO NOTAZZ - Verificar configuração e último pedido
+app.get('/api/integrations/notazz/diagnostico', (req, res) => {
+  const db = readDB();
+  let { userId } = req.query;
+
+  // Se não passar userId, pegar do primeiro usuário (para facilitar teste)
+  if (!userId && db.users && db.users.length > 0) {
+    userId = db.users[0].id;
+    console.log(`⚠️ userId não fornecido, usando primeiro usuário: ${userId}`);
+  }
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId é obrigatório e nenhum usuário encontrado no banco' });
+  }
+
+  // Buscar configuração
+  const config = db.notazzConfigs?.find(c => c.userId === userId);
+
+  // Buscar últimos pedidos do usuário
+  const userOrders = db.orders?.filter(o => o.producerId === userId)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 5) || [];
+
+  // Buscar logs do Notazz
+  const notazzLogs = db.notazzLogs?.filter(log => log.userId === userId)
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    .slice(0, 10) || [];
+
+  // Verificar último pedido AfterPay
+  const lastAfterPayOrder = userOrders.find(o => o.paymentMethod === 'afterPay');
+
+  const diagnostico = {
+    configuracao: {
+      existe: !!config,
+      ativada: config?.enabled || false,
+      envioAutomatico: config?.autoSend || false,
+      webhookId: config?.webhookId || 'NÃO CONFIGURADO',
+      ultimaAtualizacao: config?.updatedAt || 'nunca'
+    },
+    ultimosPedidos: userOrders.map(o => ({
+      id: o.id,
+      metodo: o.paymentMethod,
+      status: o.paymentStatus,
+      total: o.totalValue,
+      criadoEm: o.createdAt,
+      enviadoNotazz: o.sentToNotazz || false,
+      enviadoEm: o.sentToNotazzAt || null
+    })),
+    ultimoPedidoAfterPay: lastAfterPayOrder ? {
+      id: lastAfterPayOrder.id,
+      status: lastAfterPayOrder.paymentStatus,
+      enviadoNotazz: lastAfterPayOrder.sentToNotazz || false,
+      enviadoEm: lastAfterPayOrder.sentToNotazzAt || null,
+      cliente: lastAfterPayOrder.customer?.name || 'sem nome'
+    } : null,
+    logsNotazz: notazzLogs.map(log => ({
+      orderId: log.orderId,
+      sucesso: log.success,
+      statusCode: log.statusCode,
+      timestamp: log.timestamp,
+      erro: log.response?.error || log.response?.message || null
+    })),
+    verificacoes: {
+      configExiste: !!config,
+      configAtivada: config?.enabled === true,
+      envioAutoAtivo: config?.autoSend === true,
+      webhookIdPreenchido: !!config?.webhookId && config.webhookId.length > 0,
+      temPedidosAfterPay: userOrders.some(o => o.paymentMethod === 'afterPay'),
+      temLogsNotazz: notazzLogs.length > 0
+    },
+    problemasPossiveis: []
+  };
+
+  // Identificar problemas
+  if (!config) {
+    diagnostico.problemasPossiveis.push('❌ Configuração do Notazz não existe - configure em Settings → Integrações → Notazz');
+  }
+  if (config && !config.enabled) {
+    diagnostico.problemasPossiveis.push('❌ Integração Notazz está DESATIVADA - ative em Settings');
+  }
+  if (config && !config.autoSend) {
+    diagnostico.problemasPossiveis.push('⚠️ Envio automático está DESLIGADO - pedidos não serão enviados automaticamente');
+  }
+  if (config && (!config.webhookId || config.webhookId.length === 0)) {
+    diagnostico.problemasPossiveis.push('❌ Webhook ID não configurado - adicione o ID do webhook do Notazz');
+  }
+  if (lastAfterPayOrder && !lastAfterPayOrder.sentToNotazz && config?.enabled && config?.autoSend) {
+    diagnostico.problemasPossiveis.push('⚠️ Último pedido AfterPay NÃO foi enviado ao Notazz - verifique logs do console do backend');
+  }
+  if (notazzLogs.length > 0 && notazzLogs[0].success === false) {
+    diagnostico.problemasPossiveis.push(`❌ Último envio ao Notazz FALHOU (${notazzLogs[0].statusCode}) - verifique webhook ID e formato do payload`);
+  }
+  if (diagnostico.problemasPossiveis.length === 0) {
+    diagnostico.problemasPossiveis.push('✅ Nenhum problema detectado - configuração parece OK!');
+  }
+
+  res.json(diagnostico);
+});
+
+// Rotas de Comissões
+app.get('/api/commissions', (req, res) => {
+  const db = readDB();
+  const { userId, status } = req.query;
+
+  let commissions = db.commissions;
+
+  if (userId) {
+    commissions = commissions.filter(c =>
+      c.producerId === userId || c.affiliateId === userId
+    );
+  }
+
+  if (status) {
+    commissions = commissions.filter(c => c.status === status);
+  }
+
+  res.json(commissions);
+});
+
+// Rota de Validação de Cupom
+app.post('/api/coupons/validate', (req, res) => {
+  const db = readDB();
+  const { code, productId } = req.body;
+
+  if (!code || !productId) {
+    return res.status(400).json({ error: 'Código do cupom e ID do produto são obrigatórios' });
+  }
+
+  // Buscar o produto
+  const product = db.products.find(p => p.id === productId);
+  if (!product) {
+    return res.status(404).json({ error: 'Produto não encontrado' });
+  }
+
+  // Buscar o cupom no produto
+  const coupon = product.coupons?.find(c =>
+    c.code.toUpperCase() === code.toUpperCase() && c.isActive !== false
+  );
+
+  if (!coupon) {
+    return res.status(404).json({ error: 'Cupom inválido ou inativo' });
+  }
+
+  // Retornar os dados do cupom
+  res.json({
+    code: coupon.code,
+    type: coupon.type,
+    value: coupon.value,
+    isActive: coupon.isActive
+  });
+});
+
+// Rotas de Usuários (Admin)
+app.get('/api/users', (req, res) => {
+  const db = readDB();
+  const users = db.users.map(user => {
+    const { password, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  });
+  res.json(users);
+});
+
+app.patch('/api/users/:id', (req, res) => {
+  const db = readDB();
+  const userIndex = db.users.findIndex(u => u.id === req.params.id);
+
+  if (userIndex === -1) {
+    return res.status(404).json({ error: 'Usuário não encontrado' });
+  }
+
+  db.users[userIndex] = {
+    ...db.users[userIndex],
+    ...req.body,
+    updatedAt: new Date().toISOString()
+  };
+
+  writeDB(db);
+
+  const { password, ...userWithoutPassword } = db.users[userIndex];
+  res.json(userWithoutPassword);
+});
+
+app.delete('/api/users/:id', (req, res) => {
+  const db = readDB();
+  const userIndex = db.users.findIndex(u => u.id === req.params.id);
+
+  if (userIndex === -1) {
+    return res.status(404).json({ error: 'Usuário não encontrado' });
+  }
+
+  db.users.splice(userIndex, 1);
+  writeDB(db);
+
+  res.json({ success: true, message: 'Usuário excluído com sucesso' });
+});
+
+// ============ ROTAS DE VERIFICAÇÃO DE DOCUMENTOS (KYC) ============
+
+// Obter dados de verificação do usuário
+app.get('/api/users/:userId/verification', (req, res) => {
+  const db = readDB();
+  const { userId } = req.params;
+
+  if (!db.userVerifications) {
+    db.userVerifications = [];
+  }
+
+  const verification = db.userVerifications.find(v => v.userId === userId);
+
+  if (verification) {
+    res.json(verification);
+  } else {
+    // Retornar estrutura padrão se não existir
+    res.json({
+      userId,
+      status: 'not_submitted',
+      kyc: { status: 'pending' },
+      documentos: { statusSelfie: 'pending', statusDocumento: 'pending' },
+      dadosBancarios: { status: 'pending' },
+      notifications: []
+    });
+  }
+});
+
+// Enviar/Atualizar documentos de verificação
+app.post('/api/users/:userId/verification', (req, res) => {
+  const db = readDB();
+  const { userId } = req.params;
+  const { formData, documents, accountType } = req.body;
+
+  if (!db.userVerifications) {
+    db.userVerifications = [];
+  }
+
+  const existingIndex = db.userVerifications.findIndex(v => v.userId === userId);
+
+  const verification = {
+    userId,
+    status: 'pending',
+    accountType,
+    formData,
+    documents: {
+      selfie: documents.selfie?.name || null,
+      idFront: documents.idFront?.name || null,
+      idBack: documents.idBack?.name || null,
+      socialContract: documents.socialContract?.name || null
+    },
+    kyc: { status: 'pending' },
+    documentos: { statusSelfie: 'pending', statusDocumento: 'pending' },
+    dadosBancarios: { status: 'pending' },
+    notifications: [],
+    submittedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  if (existingIndex !== -1) {
+    db.userVerifications[existingIndex] = verification;
+  } else {
+    db.userVerifications.push(verification);
+  }
+
+  writeDB(db);
+  res.json({ success: true, verification });
+});
+
+// Atualizar status de uma seção específica (usado pelo admin)
+app.patch('/api/users/:userId/verification/:section', (req, res) => {
+  const db = readDB();
+  const { userId, section } = req.params;
+  const { status, message } = req.body;
+
+  if (!db.userVerifications) {
+    db.userVerifications = [];
+  }
+
+  const verificationIndex = db.userVerifications.findIndex(v => v.userId === userId);
+
+  if (verificationIndex === -1) {
+    return res.status(404).json({ error: 'Verificação não encontrada' });
+  }
+
+  const verification = db.userVerifications[verificationIndex];
+
+  // Atualizar status da seção
+  if (section === 'kyc') {
+    verification.kyc.status = status;
+  } else if (section === 'documentos') {
+    verification.documentos.statusSelfie = status;
+    verification.documentos.statusDocumento = status;
+  } else if (section === 'dadosBancarios') {
+    verification.dadosBancarios.status = status;
+  }
+
+  // Adicionar notificação se houver mensagem
+  if (message) {
+    if (!verification.notifications) {
+      verification.notifications = [];
+    }
+    verification.notifications.push({
+      id: uuidv4(),
+      section: section.charAt(0).toUpperCase() + section.slice(1),
+      message,
+      read: false,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  // Atualizar status geral
+  const allApproved = verification.kyc.status === 'approved' &&
+                      verification.documentos.statusSelfie === 'approved' &&
+                      verification.documentos.statusDocumento === 'approved' &&
+                      verification.dadosBancarios.status === 'approved';
+
+  const anyRejected = verification.kyc.status === 'rejected' ||
+                      verification.documentos.statusSelfie === 'rejected' ||
+                      verification.documentos.statusDocumento === 'rejected' ||
+                      verification.dadosBancarios.status === 'rejected';
+
+  if (allApproved) {
+    verification.status = 'approved';
+  } else if (anyRejected) {
+    verification.status = 'awaiting_adjustment';
+  } else {
+    verification.status = 'pending';
+  }
+
+  verification.updatedAt = new Date().toISOString();
+
+  db.userVerifications[verificationIndex] = verification;
+  writeDB(db);
+
+  res.json({ success: true, verification });
+});
+
+// Dashboard Stats
+app.get('/api/dashboard/stats', (req, res) => {
+  const db = readDB();
+  const { userId, role } = req.query;
+
+  let orders = db.orders;
+
+  // Filtrar pedidos por usuário se não for admin
+  if (userId && role !== 'admin') {
+    orders = orders.filter(o =>
+      o.producerId === userId || o.affiliateId === userId
+    );
+  }
+
+  const stats = {
+    totalOrders: orders.length,
+    pendingOrders: orders.filter(o => o.status === 'pending').length,
+    shippedOrders: orders.filter(o => o.shippingInfo?.shippingStatus === 'shipped').length,
+    deliveredOrders: orders.filter(o => o.status === 'delivered').length,
+    paidOrders: orders.filter(o => o.paymentStatus === 'paid').length,
+    totalRevenue: orders
+      .filter(o => o.paymentStatus === 'paid')
+      .reduce((sum, o) => sum + o.totalValue, 0),
+    pendingRevenue: orders
+      .filter(o => o.paymentStatus === 'pending' || o.paymentStatus === 'pending_delivery')
+      .reduce((sum, o) => sum + o.totalValue, 0)
+  };
+
+  // Se for produtor ou afiliado, calcular comissões
+  if (userId && role !== 'admin') {
+    const userCommissions = db.commissions.filter(c =>
+      c.producerId === userId || c.affiliateId === userId
+    );
+
+    stats.totalCommissions = userCommissions
+      .filter(c => c.status === 'paid')
+      .reduce((sum, c) => {
+        if (c.producerId === userId) return sum + c.producerCommission;
+        if (c.affiliateId === userId) return sum + c.affiliateCommission;
+        return sum;
+      }, 0);
+
+    stats.pendingCommissions = userCommissions
+      .filter(c => c.status === 'pending')
+      .reduce((sum, c) => {
+        if (c.producerId === userId) return sum + c.producerCommission;
+        if (c.affiliateId === userId) return sum + c.affiliateCommission;
+        return sum;
+      }, 0);
+  }
+
+  res.json(stats);
+});
+
+// Endpoints específicos para AfterPay e gerenciamento de pedidos
+
+// Adicionar código de rastreio
+app.post('/api/orders/:id/tracking', (req, res) => {
+  const db = readDB();
+  const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  const { trackingCode, carrier, estimatedDelivery } = req.body;
+
+  db.orders[orderIndex].trackingCode = trackingCode;
+  db.orders[orderIndex].shippingInfo = {
+    ...db.orders[orderIndex].shippingInfo,
+    carrier: carrier || 'Correios',
+    estimatedDelivery,
+    shippingStatus: 'shipped',
+    shippingDate: new Date().toISOString()
+  };
+  db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+  writeDB(db);
+  res.json(db.orders[orderIndex]);
+});
+
+// Confirmar entrega (AfterPay)
+app.post('/api/orders/:id/confirm-delivery', (req, res) => {
+  const db = readDB();
+  const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  const order = db.orders[orderIndex];
+
+  if (order.paymentMethod !== 'afterPay') {
+    return res.status(400).json({ error: 'Este endpoint é apenas para AfterPay' });
+  }
+
+  // Mudar status de AGENDADO para AGUARDANDO PAGAMENTO
+  db.orders[orderIndex].paymentStatus = 'pending_payment';
+  db.orders[orderIndex].deliveryConfirmedAt = new Date().toISOString();
+  db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+  // Adicionar evento de entrega no rastreamento
+  if (!db.orders[orderIndex].trackingHistory) {
+    db.orders[orderIndex].trackingHistory = [];
+  }
+
+  const deliveryEvent = {
+    id: uuidv4(),
+    status: 'Entregue',
+    location: order.shippingAddress ? `${order.shippingAddress.city || ''} - ${order.shippingAddress.state || ''}`.trim() : 'Local de entrega',
+    date: new Date().toISOString(),
+    description: 'Objeto entregue ao destinatário',
+    receivedAt: new Date().toISOString(),
+    source: 'confirmacao_manual',
+    confirmedBy: 'producer'
+  };
+
+  db.orders[orderIndex].trackingHistory.unshift(deliveryEvent);
+  console.log(`📦 Evento de entrega adicionado ao rastreamento do pedido ${order.id}`);
+
+  writeDB(db);
+
+  // Disparar webhook de pedido entregue
+  dispararWebhookPortugues(order.producerId, 'pedidoEntregue', db.orders[orderIndex]);
+
+  res.json(db.orders[orderIndex]);
+});
+
+// Cancelar venda (AGENDADO)
+app.post('/api/orders/:id/cancel', (req, res) => {
+  const db = readDB();
+  const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  const order = db.orders[orderIndex];
+
+  if (order.paymentMethod === 'afterPay' && order.paymentStatus !== 'scheduled') {
+    return res.status(400).json({ error: 'Apenas pedidos AGENDADO podem ser cancelados diretamente' });
+  }
+
+  db.orders[orderIndex].paymentStatus = 'cancelled';
+  db.orders[orderIndex].cancelledAt = new Date().toISOString();
+  db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+  // Liberar CPF bloqueado
+  if (order.customer.cpf && order.paymentMethod === 'afterPay') {
+    const blockedCpfIndex = db.blockedCpfs?.findIndex(b => b.cpf === order.customer.cpf && b.orderId === order.id);
+    if (blockedCpfIndex !== -1) {
+      db.blockedCpfs.splice(blockedCpfIndex, 1);
+    }
+  }
+
+  writeDB(db);
+
+  // Disparar webhook de cancelamento
+  dispararWebhookPortugues(order.producerId, 'cancelada', db.orders[orderIndex]);
+
+  res.json(db.orders[orderIndex]);
+});
+
+// Solicitar cancelamento (FRUSTRADO - requer aprovação admin)
+app.post('/api/orders/:id/request-cancellation', (req, res) => {
+  const db = readDB();
+  const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  const { reason } = req.body;
+
+  if (!reason || reason.length < 20) {
+    return res.status(400).json({ error: 'Justificativa deve ter no mínimo 20 caracteres' });
+  }
+
+  if (!db.cancellationRequests) {
+    db.cancellationRequests = [];
+  }
+
+  const request = {
+    id: uuidv4(),
+    orderId: req.params.id,
+    orderCode: db.orders[orderIndex].id,
+    productName: db.orders[orderIndex].productName,
+    customerName: db.orders[orderIndex].customer.name,
+    reason,
+    status: 'pending', // pending, approved, rejected
+    requestedAt: new Date().toISOString(),
+    requestedBy: db.orders[orderIndex].producerId
+  };
+
+  db.cancellationRequests.push(request);
+  db.orders[orderIndex].cancellationRequested = true;
+  db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+  writeDB(db);
+  res.json(request);
+});
+
+// Solicitar estorno (PAGO - requer aprovação admin)
+app.post('/api/orders/:id/request-refund', (req, res) => {
+  const db = readDB();
+  const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  const order = db.orders[orderIndex];
+
+  if (order.paymentStatus !== 'paid') {
+    return res.status(400).json({ error: 'Apenas pedidos PAGO podem solicitar estorno' });
+  }
+
+  const { reason } = req.body;
+
+  if (!reason || reason.length < 20) {
+    return res.status(400).json({ error: 'Justificativa deve ter no mínimo 20 caracteres' });
+  }
+
+  if (!db.refundRequests) {
+    db.refundRequests = [];
+  }
+
+  const request = {
+    id: uuidv4(),
+    orderId: req.params.id,
+    orderCode: order.id,
+    productName: order.productName,
+    customerName: order.customer.name,
+    paymentMethod: order.paymentMethod,
+    totalValue: order.totalValue,
+    reason,
+    status: 'pending', // pending, approved, rejected
+    requestedAt: new Date().toISOString(),
+    requestedBy: order.producerId
+  };
+
+  db.refundRequests.push(request);
+  db.orders[orderIndex].refundRequested = true;
+  db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+  writeDB(db);
+  res.json(request);
+});
+
+// Alterar data de vencimento do boleto
+app.post('/api/orders/:id/update-boleto', (req, res) => {
+  const db = readDB();
+  const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  const order = db.orders[orderIndex];
+
+  if (order.paymentMethod !== 'boleto') {
+    return res.status(400).json({ error: 'Este endpoint é apenas para Boleto' });
+  }
+
+  const { newDueDate } = req.body;
+
+  // Simular geração de novo boleto
+  db.orders[orderIndex].boletoInfo = {
+    ...db.orders[orderIndex].boletoInfo,
+    dueDate: newDueDate,
+    boletoCode: `${Date.now()}${Math.random().toString(36).substr(2, 9)}`,
+    updatedAt: new Date().toISOString()
+  };
+  db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+  writeDB(db);
+  res.json(db.orders[orderIndex]);
+});
+
+// Validar CPF bloqueado
+app.post('/api/checkout/validate-cpf', (req, res) => {
+  const db = readDB();
+  const { cpf, paymentMethod } = req.body;
+
+  // Se não for AfterPay, não valida bloqueio
+  if (paymentMethod !== 'afterPay') {
+    return res.json({ blocked: false });
+  }
+
+  if (!db.blockedCpfs) {
+    db.blockedCpfs = [];
+  }
+
+  // Verificar se CPF está bloqueado
+  const blockedCpf = db.blockedCpfs.find(b => b.cpf === cpf);
+
+  if (blockedCpf) {
+    const order = db.orders.find(o => o.id === blockedCpf.orderId);
+    return res.json({
+      blocked: true,
+      status: order?.paymentStatus,
+      orderId: order?.id
+    });
+  }
+
+  res.json({ blocked: false });
+});
+
+// Bloquear CPF (chamado ao criar pedido AfterPay)
+app.post('/api/checkout/block-cpf', (req, res) => {
+  const db = readDB();
+  const { cpf, orderId } = req.body;
+
+  if (!db.blockedCpfs) {
+    db.blockedCpfs = [];
+  }
+
+  // Adicionar bloqueio temporário (será associado ao pedido depois)
+  db.blockedCpfs.push({
+    id: uuidv4(),
+    cpf,
+    orderId: orderId || 'pending',
+    blockedAt: new Date().toISOString()
+  });
+
+  writeDB(db);
+  res.json({ success: true });
+});
+
+// Webhook de pagamento (simulado)
+app.post('/api/webhooks/payment', (req, res) => {
+  const db = readDB();
+  const { orderId, status } = req.body; // status: 'paid', 'failed'
+
+  const orderIndex = db.orders.findIndex(o => o.id === orderId);
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  if (status === 'paid') {
+    db.orders[orderIndex].paymentStatus = 'paid';
+    db.orders[orderIndex].paidAt = new Date().toISOString();
+    db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+    // Liberar CPF bloqueado
+    const order = db.orders[orderIndex];
+    if (order.customer.cpf && order.paymentMethod === 'afterPay') {
+      const blockedCpfIndex = db.blockedCpfs?.findIndex(b => b.cpf === order.customer.cpf && b.orderId === order.id);
+      if (blockedCpfIndex !== -1) {
+        db.blockedCpfs.splice(blockedCpfIndex, 1);
+      }
+    }
+
+    // ✅ RESETAR flag do Notazz quando pedido for pago
+    // Isso permite que o cliente faça novas compras no AfterPay sem bloqueio
+    // Nota: Não reenvia automaticamente - apenas libera para futuras compras
+    if (db.orders[orderIndex].sentToNotazz) {
+      console.log(`🔄 Pedido ${orderId} pago - resetando flag sentToNotazz para permitir futuras compras`);
+      db.orders[orderIndex].sentToNotazz = false;
+      db.orders[orderIndex].sentToNotazzAt = null;
+    }
+
+    // Atualizar comissão
+    const commissionIndex = db.commissions.findIndex(c => c.orderId === orderId);
+    if (commissionIndex !== -1) {
+      db.commissions[commissionIndex].status = 'paid';
+      db.commissions[commissionIndex].paidAt = new Date().toISOString();
+    }
+  }
+
+  writeDB(db);
+  res.json({ success: true });
+});
+
+// Webhook de rastreio Correios (simulado)
+app.post('/api/webhooks/tracking', (req, res) => {
+  const db = readDB();
+  const { trackingCode, status, location, date } = req.body;
+
+  const orderIndex = db.orders.findIndex(o => o.trackingCode === trackingCode);
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: 'Pedido não encontrado' });
+  }
+
+  if (!db.orders[orderIndex].trackingHistory) {
+    db.orders[orderIndex].trackingHistory = [];
+  }
+
+  db.orders[orderIndex].trackingHistory.push({
+    status,
+    location,
+    date: date || new Date().toISOString()
+  });
+
+  db.orders[orderIndex].updatedAt = new Date().toISOString();
+
+  writeDB(db);
+  res.json({ success: true });
+});
+
+// Jobs automáticos com cron
+
+// Job de rastreio Correios - a cada 15 minutos
+cron.schedule('*/15 * * * *', () => {
+  console.log('🚚 Executando job de rastreio Correios...');
+  const db = readDB();
+
+  const ordersWithTracking = db.orders.filter(o =>
+    o.trackingCode &&
+    o.paymentStatus !== 'delivered' &&
+    o.paymentStatus !== 'cancelled'
+  );
+
+  ordersWithTracking.forEach(order => {
+    // Aqui você faria a chamada real para a API dos Correios
+    // Por enquanto, apenas log
+    console.log(`  Rastreando: ${order.trackingCode}`);
+  });
+});
+
+// Job de verificação de pagamento - a cada 5 minutos (fallback)
+cron.schedule('*/5 * * * *', () => {
+  console.log('💰 Executando job de verificação de pagamento...');
+  const db = readDB();
+
+  const pendingOrders = db.orders.filter(o =>
+    o.paymentStatus === 'pending' ||
+    o.paymentStatus === 'pending_payment'
+  );
+
+  pendingOrders.forEach(order => {
+    // Aqui você faria a chamada real para a API do banco
+    // Por enquanto, apenas log
+    console.log(`  Verificando pagamento: ${order.id}`);
+  });
+});
+
+// Job de verificação de atraso AfterPay - diariamente às 00:00
+cron.schedule('0 0 * * *', () => {
+  console.log('⏰ Executando job de verificação de atraso AfterPay...');
+  const db = readDB();
+  let updated = false;
+
+  const afterPayOrders = db.orders.filter(o =>
+    o.paymentMethod === 'afterPay' &&
+    (o.paymentStatus === 'pending_payment' || o.paymentStatus === 'overdue')
+  );
+
+  afterPayOrders.forEach(order => {
+    if (!order.deliveryConfirmedAt) return;
+
+    const daysSinceDelivery = Math.floor(
+      (Date.now() - new Date(order.deliveryConfirmedAt).getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    const orderIndex = db.orders.findIndex(o => o.id === order.id);
+
+    // AGUARDANDO PAGAMENTO → ATRASADO (3 dias)
+    if (order.paymentStatus === 'pending_payment' && daysSinceDelivery >= 3) {
+      db.orders[orderIndex].paymentStatus = 'overdue';
+      db.orders[orderIndex].updatedAt = new Date().toISOString();
+      console.log(`  Pedido ${order.id} marcado como ATRASADO`);
+      updated = true;
+    }
+
+    // ATRASADO → FRUSTRADO (7 dias)
+    if (order.paymentStatus === 'overdue' && daysSinceDelivery >= 7) {
+      db.orders[orderIndex].paymentStatus = 'frustrated';
+      db.orders[orderIndex].updatedAt = new Date().toISOString();
+      console.log(`  Pedido ${order.id} marcado como FRUSTRADO`);
+      updated = true;
+    }
+  });
+
+  if (updated) {
+    writeDB(db);
+  }
+});
+
+// Job de expiração PIX - a cada 1 hora
+cron.schedule('0 * * * *', () => {
+  console.log('💎 Executando job de expiração PIX...');
+  const db = readDB();
+  let updated = false;
+
+  const pixOrders = db.orders.filter(o =>
+    o.paymentMethod === 'pix' &&
+    o.paymentStatus === 'pending'
+  );
+
+  pixOrders.forEach(order => {
+    const daysSinceCreation = Math.floor(
+      (Date.now() - new Date(order.createdAt).getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (daysSinceCreation >= 2) {
+      const orderIndex = db.orders.findIndex(o => o.id === order.id);
+      db.orders[orderIndex].paymentStatus = 'cancelled';
+      db.orders[orderIndex].cancelledAt = new Date().toISOString();
+      db.orders[orderIndex].cancelReason = 'PIX expirado (2 dias)';
+      db.orders[orderIndex].updatedAt = new Date().toISOString();
+      console.log(`  PIX ${order.id} cancelado por expiração`);
+      updated = true;
+    }
+  });
+
+  if (updated) {
+    writeDB(db);
+  }
+});
+
+// Job de expiração Boleto - diariamente às 06:00
+cron.schedule('0 6 * * *', () => {
+  console.log('🏦 Executando job de expiração Boleto...');
+  const db = readDB();
+  let updated = false;
+
+  const boletoOrders = db.orders.filter(o =>
+    o.paymentMethod === 'boleto' &&
+    o.paymentStatus === 'pending'
+  );
+
+  boletoOrders.forEach(order => {
+    const dueDate = order.boletoInfo?.dueDate || order.createdAt;
+    const daysSinceDue = Math.floor(
+      (Date.now() - new Date(dueDate).getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (daysSinceDue >= 7) {
+      const orderIndex = db.orders.findIndex(o => o.id === order.id);
+      db.orders[orderIndex].paymentStatus = 'cancelled';
+      db.orders[orderIndex].cancelledAt = new Date().toISOString();
+      db.orders[orderIndex].cancelReason = 'Boleto expirado (7 dias)';
+      db.orders[orderIndex].updatedAt = new Date().toISOString();
+      console.log(`  Boleto ${order.id} cancelado por expiração`);
+      updated = true;
+    }
+  });
+
+  if (updated) {
+    writeDB(db);
+  }
+});
+
+// ============ ENDPOINTS DE PAGAMENTO ============
+
+// Gerar PIX
+app.post('/api/payments/pix/generate', (req, res) => {
+  const { orderId, amount } = req.body
+
+  // Gerar código PIX simulado (na produção, usar API do banco)
+  const pixCode = `00020126580014br.gov.bcb.pix0136${uuidv4()}52040000530398654${amount.toFixed(2)}5802BR5925AFTERPAY PLATAFORMA6009SAO PAULO62070503***6304`
+
+  // Gerar QR Code em base64 (simulado - na produção usar biblioteca qrcode)
+  const qrCodeBase64 = `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==`
+
+  res.json({
+    orderId,
+    pixCopyPaste: pixCode,
+    qrCodeBase64: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pixCode)}`,
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 minutos
+  })
+})
+
+// Gerar Boleto
+app.post('/api/payments/boleto/generate', (req, res) => {
+  const { orderId, amount } = req.body
+
+  // Data de vencimento: 3 dias úteis
+  const dueDate = new Date()
+  dueDate.setDate(dueDate.getDate() + 3)
+  const dueDateFormatted = dueDate.toLocaleDateString('pt-BR')
+
+  // Gerar código de barras simulado
+  const barcode = `34191.09012 43067.840015 06080.659014 ${Math.floor(Math.random() * 9)} ${Math.floor(Date.now() / 1000)}`
+
+  // URL do PDF do boleto (simulado - na produção gerar PDF real)
+  const pdfUrl = `http://localhost:3001/api/payments/boleto/${orderId}/pdf`
+
+  res.json({
+    orderId,
+    barcode,
+    dueDate: dueDateFormatted,
+    amount,
+    beneficiary: 'AfterPay Plataforma LTDA',
+    pdfUrl
+  })
+})
+
+// Download PDF do Boleto
+app.get('/api/payments/boleto/:orderId/pdf', (req, res) => {
+  // Na produção, gerar PDF real do boleto
+  res.send(`
+    <html>
+      <head>
+        <title>Boleto Bancário</title>
+        <style>
+          body { font-family: Arial; padding: 40px; }
+          .header { text-align: center; margin-bottom: 40px; }
+          .barcode { font-size: 24px; letter-spacing: 2px; text-align: center; margin: 20px 0; }
+          .info { margin: 20px 0; }
+          .info-row { display: flex; justify-content: space-between; margin: 10px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>BOLETO BANCÁRIO</h1>
+          <h3>AfterPay Plataforma</h3>
+        </div>
+        <div class="info">
+          <div class="info-row">
+            <strong>Beneficiário:</strong>
+            <span>AfterPay Plataforma LTDA</span>
+          </div>
+          <div class="info-row">
+            <strong>Vencimento:</strong>
+            <span>${new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')}</span>
+          </div>
+          <div class="info-row">
+            <strong>Valor:</strong>
+            <span>R$ XXX,XX</span>
+          </div>
+        </div>
+        <div class="barcode">
+          34191.09012 43067.840015 06080.659014
+        </div>
+        <p style="text-align: center; color: #666;">
+          Este é um boleto de demonstração. Em produção, use uma biblioteca de geração de PDF.
+        </p>
+      </body>
+    </html>
+  `)
+})
+
+// Processar Cartão de Crédito
+app.post('/api/payments/credit-card/process', async (req, res) => {
+  const { orderId, amount, cardNumber, cardName, expiryDate, cvv, installments } = req.body
+  const db = readDB()
+
+  // Validações básicas
+  if (!cardNumber || cardNumber.length !== 16) {
+    return res.status(400).json({ success: false, message: 'Número do cartão inválido' })
+  }
+
+  if (!cvv || (cvv.length !== 3 && cvv.length !== 4)) {
+    return res.status(400).json({ success: false, message: 'CVV inválido' })
+  }
+
+  // Simular processamento (na produção, usar gateway de pagamento)
+  const approved = Math.random() > 0.1 // 90% de aprovação
+
+  if (approved) {
+    // Atualizar status do pedido
+    const orderIndex = db.orders.findIndex(o => o.id === orderId)
+    if (orderIndex !== -1) {
+      db.orders[orderIndex].paymentStatus = 'paid'
+      db.orders[orderIndex].paidAt = new Date().toISOString()
+      db.orders[orderIndex].paymentDetails = {
+        method: 'credit_card',
+        cardBrand: getCardBrand(cardNumber),
+        lastDigits: cardNumber.slice(-4),
+        installments,
+        authorizationCode: `AUTH${Date.now()}`
+      }
+
+      // ✅ RESETAR flag do Notazz quando pedido for pago via cartão
+      if (db.orders[orderIndex].sentToNotazz) {
+        console.log(`🔄 Pedido ${orderId} pago via cartão - resetando flag sentToNotazz`)
+        db.orders[orderIndex].sentToNotazz = false
+        db.orders[orderIndex].sentToNotazzAt = null
+      }
+
+      writeDB(db)
+    }
+
+    res.json({
+      success: true,
+      message: 'Pagamento aprovado com sucesso!',
+      authorizationCode: `AUTH${Date.now()}`,
+      orderId
+    })
+  } else {
+    res.status(400).json({
+      success: false,
+      message: 'Pagamento recusado. Verifique os dados do cartão ou entre em contato com seu banco.'
+    })
+  }
+})
+
+// Função auxiliar para detectar bandeira do cartão
+function getCardBrand(cardNumber) {
+  const number = cardNumber.toString()
+  if (number.startsWith('4')) return 'Visa'
+  if (number.startsWith('5')) return 'Mastercard'
+  if (number.startsWith('34') || number.startsWith('37')) return 'American Express'
+  if (number.startsWith('6011')) return 'Discover'
+  if (number.startsWith('3')) return 'Diners'
+  if (number.startsWith('60')) return 'Hipercard'
+  return 'Desconhecida'
+}
+
+// ============ INTEGRAÇÃO NOTAZZ - FUNÇÕES AUXILIARES ============
+
+// Função para enviar pedido ao Notazz (assíncrona, não bloqueia a resposta)
+async function enviarPedidoNotazz(orderId, userId) {
+  const db = readDB();
+  let notazzPayload = null; // Declarar fora do try para acessar no catch
+
+  try {
+    // Buscar configuração do Notazz
+    const notazzConfig = db.notazzConfigs?.find(c => c.userId === userId);
+
+    if (!notazzConfig || !notazzConfig.enabled) {
+      console.log(`⚠️  Integração Notazz não está ativada para usuário ${userId}`);
+      return;
+    }
+
+    // Buscar pedido
+    const order = db.orders.find(o => o.id === orderId);
+
+    if (!order) {
+      console.log(`❌ Pedido ${orderId} não encontrado`);
+      return;
+    }
+
+    // ========== LOG: Dados do pedido ANTES de processar ==========
+    console.log(`\n📦 ========== DADOS DO PEDIDO NO BANCO ==========`);
+    console.log(`ID: ${order.id}`);
+    console.log(`Cliente no banco: "${order.customer?.name}"`);
+    console.log(`Email no banco: "${order.customer?.email}"`);
+    console.log(`CPF no banco: "${order.customer?.cpf}"`);
+    console.log(`Endereço no banco: "${order.customer?.address}, ${order.customer?.number}"`);
+    console.log(`Bairro no banco: "${order.customer?.neighborhood}"`);
+    console.log(`Cidade no banco: "${order.customer?.city}/${order.customer?.state}"`);
+    console.log(`CEP no banco: "${order.customer?.zipCode}"`);
+    console.log(`Valor no banco: R$ ${order.totalValue}`);
+    console.log(`Plano no banco: "${order.selectedPlanName || 'Sem plano'}"`);
+    console.log(`=================================================\n`);
+
+    // Verificar se pedido já foi enviado ao Notazz
+    if (order.sentToNotazz) {
+      console.log(`ℹ️ Pedido ${orderId} já foi enviado ao Notazz em ${order.sentToNotazzAt || 'data desconhecida'}`);
+      console.log(`⏭️ Pulando envio duplicado`);
+      return;
+    }
+
+    // Buscar informações do produto
+    const product = db.products?.find(p => p.id === order.productId);
+
+    // Mapear status do pedido para status do Notazz
+    const statusMap = {
+      'paid': 'paid',
+      'pending': 'paid',           // AfterPay pendente → considerar pago para NF
+      'scheduled': 'paid',         // AfterPay agendado → considerar pago para NF
+      'refunded': 'refunded',
+      'cancelled': 'refunded',
+      'chargeback': 'chargeback'
+    };
+
+    const notazzStatus = statusMap[order.paymentStatus] || 'paid';
+
+    // Preparar payload conforme documentação do WEBHOOK Notazz
+    // Documentação: https://app.notazz.com/docs/webhooks/
+
+    // Obter endereço de entrega
+    const shippingAddr = order.shippingAddress || order.customer || {};
+
+    // CPF/CNPJ do cliente
+    const cpfCnpj = (order.customer?.cpf || '').replace(/\D/g, '');
+
+    // Preparar array de produtos no formato do webhook
+    const products = [{
+      id: order.productId || '1',
+      name: order.productName || 'Produto',
+      amount: String(order.quantity || 1),
+      unitary_value: parseFloat(order.productPrice || order.totalValue || 0).toFixed(2)
+    }];
+
+    // ========== FORMATO WEBHOOK PARA CRIAR PEDIDO ==========
+    // Documentação: https://app.notazz.com/docs/webhooks/
+    // Endpoint: https://app.notazz.com/webhook/{token}
+    // Este formato cria o PEDIDO no Notazz (não a NF-e diretamente)
+
+    console.log(`📡 Modo de integração: Webhook (Criar Pedido)`);
+
+    // ========== FUNÇÕES DE FORMATAÇÃO E VALIDAÇÃO ==========
+
+    // Função para garantir que o valor seja string não-vazia
+    const garantirString = (valor, padrao = '') => {
+      if (valor === null || valor === undefined || valor === '') {
+        return String(padrao);
+      }
+      return String(valor).trim();
+    };
+
+    // Função para formatar valores monetários como string
+    const formatarValor = (valor) => {
+      const num = parseFloat(valor || 0);
+      return num.toFixed(2);
+    };
+
+    // Função para limpar e validar CPF/CNPJ
+    const limparCpfCnpj = (doc) => {
+      return String(doc || '').replace(/\D/g, '');
+    };
+
+    // Função para limpar CEP
+    const limparCep = (cep) => {
+      return String(cep || '').replace(/\D/g, '').padStart(8, '0');
+    };
+
+    // Função para limpar telefone
+    const limparTelefone = (tel) => {
+      return String(tel || '').replace(/\D/g, '');
+    };
+
+    // ========== VALIDAÇÃO E PREPARAÇÃO DOS DADOS ==========
+
+    // CPF/CNPJ limpo
+    const docLimpo = limparCpfCnpj(cpfCnpj);
+
+    // Determinar tipo de pessoa
+    let tipoPessoa = 'F'; // Padrão: Pessoa Física
+    if (docLimpo.length === 14) {
+      tipoPessoa = 'J'; // Pessoa Jurídica (CNPJ)
+    } else if (docLimpo.length !== 11) {
+      tipoPessoa = 'E'; // Estrangeiro (ou inválido)
+    }
+
+    // Validar campos obrigatórios do endereço
+    const rua = garantirString(shippingAddr.address || shippingAddr.street, 'Não informado');
+    const numero = garantirString(shippingAddr.number, 'S/N');
+    const bairro = garantirString(shippingAddr.neighborhood || shippingAddr.district, 'Centro');
+    const cidade = garantirString(shippingAddr.city, 'Não informado');
+    const uf = garantirString(shippingAddr.state, 'PE').toUpperCase().substring(0, 2);
+    const cep = limparCep(shippingAddr.zipCode || shippingAddr.cep);
+
+    // Validar nome do cliente
+    const nomeCliente = garantirString(order.customer?.name, 'Cliente');
+
+    // Validar email e telefone
+    const email = garantirString(order.customer?.email, '');
+    const telefone = limparTelefone(order.customer?.phone);
+
+    // Validar produto
+    const nomeProduto = garantirString(order.productName, 'Produto');
+    const quantidadeProduto = String(Math.max(1, parseInt(order.quantity) || 1));
+    const valorProduto = formatarValor(order.productPrice || order.totalValue);
+
+    // Validar valor total
+    const valorTotal = formatarValor(order.totalValue);
+
+    console.log(`\n🔍 ========== VALIDAÇÃO DOS DADOS ==========`);
+    console.log(`Cliente: "${nomeCliente}"`);
+    console.log(`CPF/CNPJ: "${docLimpo}" (${docLimpo.length} dígitos) - Tipo: ${tipoPessoa}`);
+    console.log(`Endereço: "${rua}", ${numero}`);
+    console.log(`Bairro: "${bairro}"`);
+    console.log(`Cidade: "${cidade}" - UF: "${uf}"`);
+    console.log(`CEP: "${cep}" (${cep.length} dígitos)`);
+    console.log(`Email: "${email}"`);
+    console.log(`Telefone: "${telefone}"`);
+    console.log(`Produto: "${nomeProduto}" - Qtd: ${quantidadeProduto} - Valor: R$ ${valorProduto}`);
+    console.log(`Valor Total: R$ ${valorTotal}`);
+    console.log(`===========================================\n`);
+
+    // Verificar campos críticos
+    if (!docLimpo || (docLimpo.length !== 11 && docLimpo.length !== 14)) {
+      console.log(`❌ CPF/CNPJ inválido: "${docLimpo}" (tamanho: ${docLimpo.length})`);
+      return;
+    }
+
+    if (!cep || cep.length !== 8) {
+      console.log(`❌ CEP inválido: "${cep}" (tamanho: ${cep.length})`);
+      return;
+    }
+
+    if (!uf || uf.length !== 2) {
+      console.log(`❌ UF inválido: "${uf}"`);
+      return;
+    }
+
+    if (parseFloat(valorTotal) <= 0) {
+      console.log(`❌ Valor total inválido: R$ ${valorTotal}`);
+      return;
+    }
+
+    // Preparar produtos no formato WEBHOOK (lowercase)
+    const webhookProducts = [{
+      id: String(order.productId || '1'),
+      name: nomeProduto,
+      amount: quantidadeProduto,
+      unitary_value: valorProduto
+    }];
+
+    // ========== PAYLOAD WEBHOOK (CRIAR PEDIDO) ==========
+    // Formato conforme documentação: https://app.notazz.com/docs/webhooks/
+    // Este formato cria o PEDIDO no Notazz (não gera NF-e diretamente)
+
+    // Gerar identificadores únicos (padrão de outras integrações bem-sucedidas)
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const uniqueId = `${order.id}-${timestamp}-${randomSuffix}`;
+
+    notazzPayload = {
+      // ========== IDENTIFICAÇÃO ÚNICA (Múltiplos campos para garantir) ==========
+      id: uniqueId,                            // ID completamente único com timestamp + random
+      status: notazzStatus,                    // paid, refunded, chargeback
+      date: order.createdAt || new Date().toISOString(),  // Data específica do pedido
+
+      // ========== CLIENTE (dados reais para cada pedido) ==========
+      customer_name: nomeCliente,
+      customer_email: email || `pedido-${order.id}-${timestamp}@temp.com`, // Email único
+      customer_doc: docLimpo,
+      customer_phone: telefone,
+      customer_street: rua,
+      customer_number: numero,
+      customer_complement: garantirString(shippingAddr.complement, ''),
+      customer_district: bairro,
+      customer_city: cidade,
+      customer_state: uf,
+      customer_zipcode: cep,
+      customer_country: 'BR',  // País
+
+      // ========== PRODUTOS ==========
+      product: webhookProducts,
+
+      // ========== VALORES ==========
+      total: valorTotal,
+      currency: 'BRL',  // Moeda
+
+      // ========== INFORMAÇÕES ADICIONAIS ==========
+      payment_method: order.paymentMethod || 'afterPay',
+      request_origin: 'Pag2 Pay',  // FIXO - NÃO PODE MUDAR!
+
+      // ========== DADOS DO PRODUTOR (pode ajudar na diferenciação) ==========
+      producer_name: order.producerName || 'Pag2 Pay',
+      producer_doc: '',  // Vazio por enquanto
+      producer_email: ''  // Vazio por enquanto
+    };
+
+    console.log(`\n📤 ========== ENVIANDO PARA NOTAZZ ==========`);
+    console.log(`📤 Pedido: ${orderId}`);
+    console.log(`🔑 Webhook Token: ${notazzConfig.webhookId.substring(0, 10)}...`);
+
+    // URL do Webhook Notazz
+    const notazzUrl = `https://app.notazz.com/webhook/${notazzConfig.webhookId}`;
+
+    console.log(`🌐 URL: ${notazzUrl}`);
+    console.log(`📦 Payload:`, JSON.stringify(notazzPayload, null, 2));
+
+    const notazzResponse = await fetch(notazzUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(notazzPayload)
+    });
+
+    console.log(`\n📥 ========== RESPOSTA DO NOTAZZ ==========`);
+    console.log(`Status HTTP: ${notazzResponse.status} ${notazzResponse.ok ? '✅' : '❌'}`);
+    console.log(`Response Headers:`, Object.fromEntries(notazzResponse.headers.entries()));
+
+    // Capturar o body como texto primeiro para debug
+    const responseText = await notazzResponse.text();
+    console.log(`Response Body (texto bruto):`, responseText);
+
+    let notazzData;
+    try {
+      notazzData = JSON.parse(responseText);
+      console.log(`Resposta JSON parseada:`, JSON.stringify(notazzData, null, 2));
+    } catch (e) {
+      console.log(`⚠️ Resposta NÃO é JSON válido. Erro:`, e.message);
+      notazzData = { error: 'Resposta não é JSON', raw: responseText };
+    }
+
+    console.log(`===========================================\n`);
+
+    // Salvar log do envio
+    const dbAtual = readDB(); // Recarregar DB para evitar conflitos
+    if (!dbAtual.notazzLogs) {
+      dbAtual.notazzLogs = [];
+    }
+
+    dbAtual.notazzLogs.push({
+      id: uuidv4(),
+      orderId: orderId,
+      userId: userId,
+      success: notazzResponse.ok,
+      statusCode: notazzResponse.status,
+      payload: notazzPayload,
+      response: notazzData,
+      timestamp: new Date().toISOString()
+    });
+
+    writeDB(dbAtual);
+
+    if (notazzResponse.ok) {
+      console.log(`✅ Pedido enviado com sucesso ao Notazz`);
+      console.log(`📋 Resposta:`, notazzData);
+
+      // Marcar pedido como enviado para Notazz para evitar duplicação
+      const dbParaMarcar = readDB();
+      const orderIndexToMark = dbParaMarcar.orders.findIndex(o => o.id === orderId);
+      if (orderIndexToMark !== -1) {
+        dbParaMarcar.orders[orderIndexToMark].sentToNotazz = true;
+        dbParaMarcar.orders[orderIndexToMark].sentToNotazzAt = new Date().toISOString();
+        writeDB(dbParaMarcar);
+        console.log(`🏷️ Pedido ${orderId} marcado como enviado ao Notazz`);
+      }
+    } else {
+      console.log(`⚠️ Erro ao enviar pedido ao Notazz: ${notazzResponse.status}`);
+      console.log(`📋 Detalhes:`, notazzData);
+    }
+  } catch (error) {
+    console.error(`❌ Erro ao enviar pedido para Notazz: ${error.message}`);
+
+    // Salvar log do erro
+    try {
+      const dbAtual = readDB();
+      if (!dbAtual.notazzLogs) {
+        dbAtual.notazzLogs = [];
+      }
+
+      dbAtual.notazzLogs.push({
+        id: uuidv4(),
+        orderId: orderId,
+        userId: userId,
+        success: false,
+        statusCode: 0,
+        payload: notazzPayload || { error: 'Payload não gerado' },
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+
+      writeDB(dbAtual);
+    } catch (logError) {
+      console.error(`❌ Erro ao salvar log:`, logError.message);
+    }
+  }
+}
+
+// ============ SISTEMA DE WEBHOOKS EM PORTUGUÊS ============
+
+// Função para formatar telefone para formato internacional (55XXXXXXXXXXX)
+function formatPhoneToInternational(phone) {
+  if (!phone) return '';
+
+  // Remove tudo que não é número
+  const numbersOnly = phone.replace(/\D/g, '');
+
+  // Se já tem DDI (começa com 55), retorna como está
+  if (numbersOnly.startsWith('55') && numbersOnly.length >= 12) {
+    return numbersOnly;
+  }
+
+  // Se tem 11 dígitos (celular com DDD), adiciona 55
+  if (numbersOnly.length === 11) {
+    return '55' + numbersOnly;
+  }
+
+  // Se tem 10 dígitos (fixo com DDD), adiciona 55
+  if (numbersOnly.length === 10) {
+    return '55' + numbersOnly;
+  }
+
+  // Se não tem DDD mas tem 9 dígitos (celular sem DDD), retorna só os números
+  // O usuário terá que configurar o DDD manualmente
+  return numbersOnly;
+}
+
+// Função para disparar webhooks em português
+async function dispararWebhookPortugues(userId, evento, dadosPedido) {
+  const db = readDB()
+
+  console.log(`\n🔔 ====== DISPARANDO WEBHOOK ======`)
+  console.log(`👤 UserId: ${userId}`)
+  console.log(`📡 Evento: ${evento}`)
+  console.log(`📦 Pedido ID: ${dadosPedido.id}`)
+  console.log(`🏷️  Produto: ${dadosPedido.productName} (Código: ${dadosPedido.productCode || 'N/A'}, ID: ${dadosPedido.productId})`)
+  console.log(`📊 Total de webhooks no sistema: ${db.webhooks?.length || 0}`)
+
+  // Buscar webhooks configurados pelo usuário
+  const webhooksUsuario = db.webhooks?.filter(w =>
+    w.userId === userId &&
+    w.status === true &&
+    w.events[evento] === true
+  ) || []
+
+  console.log(`✅ Webhooks encontrados para este usuário e evento: ${webhooksUsuario.length}`)
+
+  if (webhooksUsuario.length === 0) {
+    console.log(`📭 Nenhum webhook configurado para o evento: ${evento}`)
+    console.log(`💡 Verifique se:`)
+    console.log(`   - O webhook está ativo (status: true)`)
+    console.log(`   - O evento "${evento}" está marcado`)
+    console.log(`   - O userId do webhook (${userId}) corresponde ao produtor do produto`)
+    console.log(`=====================================\n`)
+    return
+  }
+
+  // Mapeamento de eventos (mantém em inglês para compatibilidade)
+  const eventosIngles = {
+    aguardandoPagamento: 'aguardandoPagamento',
+    pagamentoAprovado: 'pagamentoAprovado',
+    cancelada: 'cancelada',
+    agendado: 'agendado',
+    frustrada: 'frustrada',
+    codigoRastreio: 'codigoRastreio',
+    pedidoEntregue: 'pedidoEntregue',
+    saiuParaEntrega: 'saiuParaEntrega',
+    aguardandoRetirada: 'aguardandoRetirada'
+  }
+
+  // Preparar valores para o payload
+  const valorTotal = dadosPedido.totalValue || dadosPedido.productPrice || 0;
+  const comissaoProdutor = dadosPedido.producerCommission || 0;
+  const comissaoAfiliado = dadosPedido.affiliateCommission || 0;
+
+  // Enviar para cada webhook configurado
+  for (const webhook of webhooksUsuario) {
+    // Verificar se o webhook é para um produto específico
+    if (webhook.product && webhook.product !== '' && webhook.product !== 'Todos os produtos') {
+      // O formato do produto pode ser: "CODIGO - Nome do Produto" ou apenas o nome
+      // Vamos verificar se o nome do produto do pedido está contido no webhook.product
+      const nomeProdutoPedido = dadosPedido.productName || ''
+      const codigoProdutoPedido = dadosPedido.productCode || ''
+      const idProdutoPedido = dadosPedido.productId || ''
+
+      // Verificar se o webhook corresponde a este produto (por nome, código ou ID)
+      const produtoMatch =
+        webhook.product.includes(nomeProdutoPedido) || // Contém o nome
+        webhook.product.includes(codigoProdutoPedido) || // Contém o código
+        webhook.product.includes(idProdutoPedido) // Contém o ID
+
+      if (!produtoMatch) {
+        console.log(`⏭️  Pulando webhook "${webhook.name}" - produto "${webhook.product}" não corresponde ao pedido "${nomeProdutoPedido}"`)
+        continue // Pular este webhook se não for para este produto
+      }
+
+      console.log(`✅ Webhook "${webhook.name}" corresponde ao produto "${nomeProdutoPedido}"`)
+    }
+
+    // Construir payload no formato Botconversa (padrão de mercado)
+    const payload = {
+      // Parâmetros gerais
+      basic_authentication: webhook.code || '',
+      type: {
+        pending: 'pending',
+        pending_payment: 'pending',
+        scheduled: 'scheduled',
+        paid: 'approved',
+        cancelled: 'cancelled',
+        refunded: 'refunded'
+      }[dadosPedido.paymentStatus] || 'pending',
+      currency: 'BRL',
+
+      // Informações do produto
+      product_name: dadosPedido.productName || '',
+      product_key: dadosPedido.productId || '',
+      product_type: 'digital',
+
+      // Informações do plano
+      plan_key: dadosPedido.productId || '',
+      plan_name: dadosPedido.productName || '',
+      plan_amount: dadosPedido.quantity || 1,
+
+      // Informações da transação/venda
+      trans_key: dadosPedido.id || '',
+      trans_createdate: dadosPedido.createdAt || new Date().toISOString(),
+      trans_updatedate: dadosPedido.updatedAt || new Date().toISOString(),
+      trans_value: valorTotal.toFixed(2),
+      trans_status: {
+        pending: 'aguardando_pagamento',
+        pending_payment: 'aguardando_pagamento',
+        scheduled: 'agendado',
+        paid: 'pagamento_aprovado',
+        cancelled: 'cancelada',
+        refunded: 'reembolsado'
+      }[dadosPedido.paymentStatus] || 'aguardando_pagamento',
+
+      // Informações do cliente
+      client_name: dadosPedido.customer?.name || '',
+      client_email: dadosPedido.customer?.email || '',
+      client_cellphone: formatPhoneToInternational(dadosPedido.customer?.phone || ''),
+      client_document: dadosPedido.customer?.cpf || '',
+
+      // Endereço do cliente
+      // Suporta tanto customer.address quanto customer.address (estrutura aninhada)
+      client_address: dadosPedido.customer?.address?.street || dadosPedido.customer?.address || '',
+      client_address_number: dadosPedido.customer?.address?.number || dadosPedido.customer?.number || '',
+      client_address_comp: dadosPedido.customer?.address?.complement || dadosPedido.customer?.complement || '',
+      client_address_district: dadosPedido.customer?.address?.neighborhood || dadosPedido.customer?.neighborhood || '',
+      client_address_city: dadosPedido.customer?.address?.city || dadosPedido.customer?.city || '',
+      client_address_state: dadosPedido.customer?.address?.state || dadosPedido.customer?.state || '',
+      client_address_country: 'BR',
+      client_address_zipcode: dadosPedido.customer?.address?.zipCode || dadosPedido.customer?.zipCode || '',
+
+      // Método de pagamento
+      payment_type: {
+        creditCard: 'credit_card',
+        pix: 'pix',
+        boleto: 'boleto',
+        afterPay: 'afterpay'
+      }[dadosPedido.paymentMethod] || dadosPedido.paymentMethod || '',
+
+      // Informações do produtor
+      producer_name: dadosPedido.producerName || '',
+      producer_document: String(dadosPedido.producerId || ''),
+      producer_commission: comissaoProdutor.toFixed(2),
+
+      // Informações do afiliado
+      affiliate_name: dadosPedido.affiliateName || null,
+      affiliate_key: dadosPedido.affiliateId || null,
+      affiliate_commission: comissaoAfiliado.toFixed(2),
+
+      // Rastreamento
+      tracking_code: dadosPedido.trackingCode || null,
+
+      // Campos adicionais para compatibilidade
+      order_id: dadosPedido.id || '',
+      order_number: dadosPedido.orderNumber || dadosPedido.id || '',
+      order_date: dadosPedido.createdAt || new Date().toISOString(),
+      paid_date: dadosPedido.paidAt || null
+    }
+
+    try {
+      console.log(`\n🚀 Disparando webhook: ${webhook.name}`)
+      console.log(`🌐 URL: ${webhook.url}`)
+      console.log(`📦 Payload (PT-BR):`, JSON.stringify(payload, null, 2))
+
+      // Enviar webhook via HTTP POST
+      const response = await fetch(webhook.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Pag2Pay-Webhook/1.0',
+          'X-Webhook-Event': eventosIngles[evento] || evento,
+          'X-Webhook-Signature': webhook.code
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const responseText = await response.text()
+
+      console.log(`📡 Resposta HTTP Status: ${response.status}`)
+      console.log(`📄 Resposta Body: ${responseText.substring(0, 200)}`)
+
+      // Salvar log do webhook no banco de dados
+      if (!db.webhookLogs) {
+        db.webhookLogs = []
+      }
+
+      db.webhookLogs.push({
+        id: uuidv4(),
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+        url: webhook.url,
+        evento: eventosIngles[evento] || evento,
+        payload: payload,
+        sucesso: response.ok,
+        statusCode: response.status,
+        dataHora: new Date().toISOString(),
+        resposta: responseText.substring(0, 500) // Limitar resposta a 500 caracteres
+      })
+
+      writeDB(db)
+
+      if (response.ok) {
+        console.log(`✅ Webhook enviado com sucesso: ${webhook.name} (Status: ${response.status})`)
+      } else {
+        console.log(`⚠️ Webhook enviado mas retornou erro: ${webhook.name} (Status: ${response.status})`)
+      }
+      console.log(`=====================================\n`)
+
+    } catch (error) {
+      console.error(`\n❌ ERRO ao enviar webhook ${webhook.name}`)
+      console.error(`🌐 URL: ${webhook.url}`)
+      console.error(`⚠️ Erro: ${error.message}`)
+      console.error(`📋 Stack: ${error.stack}`)
+
+      // Salvar log de erro
+      if (!db.webhookLogs) {
+        db.webhookLogs = []
+      }
+
+      db.webhookLogs.push({
+        id: uuidv4(),
+        webhookId: webhook.id,
+        webhookName: webhook.name,
+        url: webhook.url,
+        evento: eventosPortugues[evento],
+        payload: payload,
+        sucesso: false,
+        dataHora: new Date().toISOString(),
+        erro: error.message
+      })
+
+      writeDB(db)
+      console.log(`=====================================\n`)
+    }
+  }
+}
+
+// ============ SIMULAÇÃO E WEBHOOKS ============
+
+// Simular confirmação de pagamento (para testes)
+app.post('/api/payments/simulate-confirmation', (req, res) => {
+  const { orderId } = req.body
+  const db = readDB()
+
+  const orderIndex = db.orders.findIndex(o => o.id === orderId)
+  if (orderIndex === -1) {
+    return res.status(404).json({ success: false, message: 'Pedido não encontrado' })
+  }
+
+  // Atualizar status do pedido para pago
+  db.orders[orderIndex].paymentStatus = 'paid'
+  db.orders[orderIndex].paidAt = new Date().toISOString()
+  db.orders[orderIndex].updatedAt = new Date().toISOString()
+
+  // Liberar CPF bloqueado se for AfterPay
+  const order = db.orders[orderIndex]
+  if (order.paymentMethod === 'afterPay' && order.customer.cpf) {
+    const blockedCpfIndex = db.blockedCpfs?.findIndex(b => b.cpf === order.customer.cpf && b.orderId === order.id)
+    if (blockedCpfIndex !== -1) {
+      db.blockedCpfs.splice(blockedCpfIndex, 1)
+    }
+  }
+
+  // ✅ RESETAR flag do Notazz quando pedido for pago (simulação)
+  if (db.orders[orderIndex].sentToNotazz) {
+    console.log(`🔄 Pedido ${orderId} pago (simulação) - resetando flag sentToNotazz`)
+    db.orders[orderIndex].sentToNotazz = false
+    db.orders[orderIndex].sentToNotazzAt = null
+  }
+
+  // Atualizar comissão
+  const commissionIndex = db.commissions?.findIndex(c => c.orderId === orderId)
+  if (commissionIndex !== -1) {
+    db.commissions[commissionIndex].status = 'paid'
+    db.commissions[commissionIndex].paidAt = new Date().toISOString()
+  }
+
+  writeDB(db)
+
+  // Simular envio de email de confirmação
+  console.log(`📧 Email de confirmação enviado para: ${order.customer.email}`)
+  console.log(`✅ Pagamento confirmado para pedido: ${orderId}`)
+
+  res.json({
+    success: true,
+    message: 'Pagamento confirmado com sucesso!',
+    order: db.orders[orderIndex]
+  })
+})
+
+// Webhook genérico para confirmação de pagamento (para integração com gateways)
+app.post('/api/webhooks/payment-confirmation', (req, res) => {
+  const { orderId, transactionId, status, amount, paymentMethod } = req.body
+
+  console.log('🔔 Webhook recebido:', {
+    orderId,
+    transactionId,
+    status,
+    amount,
+    paymentMethod
+  })
+
+  const db = readDB()
+  const orderIndex = db.orders.findIndex(o => o.id === orderId)
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ success: false, message: 'Pedido não encontrado' })
+  }
+
+  // Processar webhook baseado no status
+  if (status === 'approved' || status === 'paid') {
+    db.orders[orderIndex].paymentStatus = 'paid'
+    db.orders[orderIndex].paidAt = new Date().toISOString()
+    db.orders[orderIndex].transactionId = transactionId
+    db.orders[orderIndex].updatedAt = new Date().toISOString()
+
+    // ✅ RESETAR flag do Notazz quando pedido for pago via webhook
+    if (db.orders[orderIndex].sentToNotazz) {
+      console.log(`🔄 Pedido ${orderId} pago via webhook - resetando flag sentToNotazz`)
+      db.orders[orderIndex].sentToNotazz = false
+      db.orders[orderIndex].sentToNotazzAt = null
+    }
+
+    // Atualizar comissão
+    const commissionIndex = db.commissions?.findIndex(c => c.orderId === orderId)
+    if (commissionIndex !== -1) {
+      db.commissions[commissionIndex].status = 'paid'
+      db.commissions[commissionIndex].paidAt = new Date().toISOString()
+    }
+
+    writeDB(db)
+
+    console.log(`✅ Pagamento aprovado via webhook: ${orderId}`)
+    res.json({ success: true, message: 'Pagamento confirmado' })
+  } else if (status === 'cancelled' || status === 'refunded') {
+    db.orders[orderIndex].paymentStatus = 'cancelled'
+    db.orders[orderIndex].updatedAt = new Date().toISOString()
+    writeDB(db)
+
+    console.log(`❌ Pagamento cancelado via webhook: ${orderId}`)
+    res.json({ success: true, message: 'Pagamento cancelado' })
+  } else {
+    res.json({ success: true, message: 'Status recebido' })
+  }
+})
+
+// 🚚 ========== INTEGRAÇÃO 123LOG ========== //
+
+// Obter configuração da integração 123Log
+app.get('/api/integrations/123log', (req, res) => {
+  const db = readDB()
+  const integration = db.logisticsIntegrations?.['123log'] || {
+    enabled: false,
+    webhookKey: '',
+    webhookUrl: '',
+    notificationSettings: {
+      notifyViaBotConversa: true,
+      eventsToNotify: []
+    }
+  }
+
+  res.json(integration)
+})
+
+// Atualizar configuração da integração 123Log
+app.put('/api/integrations/123log', (req, res) => {
+  const db = readDB()
+  const { webhookKey, notificationSettings } = req.body
+
+  if (!db.logisticsIntegrations) {
+    db.logisticsIntegrations = {}
+  }
+
+  const webhookUrl = `${process.env.API_URL || 'http://localhost:3001'}/api/webhooks/123log`
+
+  db.logisticsIntegrations['123log'] = {
+    enabled: webhookKey ? true : false,
+    webhookKey: webhookKey || '',
+    webhookUrl: webhookUrl,
+    notificationSettings: notificationSettings || {
+      notifyViaBotConversa: true,
+      eventsToNotify: [
+        'codigo_adicionado',
+        'objeto_postado',
+        'em_transito',
+        'saiu_para_entrega',
+        'entregue'
+      ]
+    },
+    createdAt: db.logisticsIntegrations?.['123log']?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+
+  writeDB(db)
+
+  console.log('✅ Configuração 123Log atualizada')
+  res.json(db.logisticsIntegrations['123log'])
+})
+
+// Testar webhook 123Log
+app.post('/api/integrations/123log/test', async (req, res) => {
+  const db = readDB()
+  const integration = db.logisticsIntegrations?.['123log']
+
+  // Permitir teste mesmo sem configuração (para desenvolvimento)
+  const testKey = integration?.webhookKey || 'TESTE-LOCAL-' + Date.now()
+  const isConfigured = integration?.enabled && integration?.webhookKey
+
+  // Criar um payload de teste usando o formato REAL da 123Log
+  const testPayload = {
+    integration_key: testKey,
+    type: 'TRACKING_STATUS_CHANGED',
+    sale_order: {
+      id: '123log-teste-' + Date.now(),
+      order_number: 'TESTE-' + Date.now(),
+      status: {
+        status: 'APPROVED',
+        description: 'Pedido de teste aprovado'
+      },
+      customer: {
+        name: 'Cliente Teste',
+        email: 'teste@afterpay.com',
+        phone: '11999999999'
+      }
+    },
+    delivery: {
+      carrier: 'Correios',
+      service: 'SEDEX',
+      tracking_code: 'BR999999999BR',
+      status: 'SHIPPED',
+      promised_delivery_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      last_event: {
+        date: new Date().toISOString(),
+        status: 'Teste de integração',
+        location: 'Sistema AfterPay - Teste Local',
+        description: 'Este é um evento de teste do webhook 123Log. Sistema funcionando corretamente!'
+      },
+      history: [
+        {
+          date: new Date().toISOString(),
+          status: 'Teste de integração',
+          location: 'Sistema AfterPay - Teste Local',
+          description: 'Este é um evento de teste do webhook 123Log. Sistema funcionando corretamente!'
+        }
+      ]
+    }
+  }
+
+  try {
+    const response = await fetch(`http://localhost:3001/api/webhooks/123log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(testPayload)
+    })
+
+    const result = await response.json()
+
+    // Teste é considerado sucesso se:
+    // 1. Webhook retornou 200 (OK), OU
+    // 2. É teste local e foi processado (isTest: true), OU
+    // 3. Webhook foi executado (mesmo que pedido não exista)
+    const testSuccess = response.ok || result.isTest === true || response.status !== 500
+
+    // Determinar mensagem apropriada
+    let message = ''
+    if (result.isTest) {
+      // Teste local bem-sucedido
+      message = '✅ Teste local processado com sucesso! Sistema funcionando corretamente.'
+    } else if (response.ok) {
+      // Teste com chave - webhook processou com sucesso
+      message = '✅ Teste realizado com sucesso! Webhook processado corretamente. Verifique o histórico abaixo.'
+    } else if (result.error === 'Pedido não encontrado') {
+      // Erro esperado - pedido de teste não existe
+      message = '✅ Teste OK! Webhook recebido e processado (pedido de teste não precisa existir). Verifique o histórico abaixo.'
+    } else if (result.error === 'Chave de integração inválida') {
+      // Chave errada
+      message = '❌ Chave de integração inválida. Verifique se salvou a configuração corretamente.'
+      testSuccess = false
+    } else {
+      // Outro erro
+      message = result.error || result.message || 'Teste concluído com avisos'
+    }
+
+    res.json({
+      success: testSuccess,
+      status: response.status,
+      message: message,
+      result: result,
+      isLocalTest: !isConfigured,
+      details: {
+        webhookProcessed: response.status !== 500,
+        configuredKey: isConfigured,
+        responseStatus: response.status,
+        resultMessage: result.message
+      }
+    })
+  } catch (error) {
+    console.error('Erro no teste:', error)
+    res.status(500).json({
+      success: false,
+      message: '❌ Erro ao executar teste: ' + error.message,
+      error: error.message
+    })
+  }
+})
+
+// Obter logs de webhooks
+app.get('/api/webhooks/logs', (req, res) => {
+  const db = readDB()
+  const { source, limit = 20 } = req.query
+
+  let logs = db.webhookLogs || []
+
+  if (source) {
+    logs = logs.filter(log => log.source === source)
+  }
+
+  logs = logs.slice(0, parseInt(limit))
+
+  res.json(logs)
+})
+
+// 🚚 Webhook da 123Log para receber atualizações de rastreamento
+app.post('/api/webhooks/123log', async (req, res) => {
+  console.log('📦 Webhook 123Log recebido:', JSON.stringify(req.body, null, 2))
+
+  const db = readDB()
+
+  // Extrair dados do formato real da 123Log
+  const {
+    integration_key,
+    type,
+    sale_order,
+    delivery
+  } = req.body
+
+  // 1. Validar chave de integração
+  const integration = db.logisticsIntegrations?.['123log']
+
+  // Permitir teste local sem configuração (chave começa com TESTE-LOCAL-)
+  const isLocalTest = integration_key?.startsWith('TESTE-LOCAL-')
+
+  if (!isLocalTest) {
+    if (!integration || !integration.enabled) {
+      console.log('❌ Integração 123Log não configurada ou desativada')
+      return res.status(400).json({ error: 'Integração não configurada' })
+    }
+
+    if (integration_key !== integration.webhookKey) {
+      console.log('❌ Chave de integração inválida:', integration_key)
+
+      // Registrar tentativa falha
+      if (!db.webhookLogs) db.webhookLogs = []
+      db.webhookLogs.unshift({
+        id: uuidv4(),
+        source: '123log',
+        receivedAt: new Date().toISOString(),
+        orderId: sale_order?.order_number || 'unknown',
+        event: type || 'unknown',
+        payload: req.body,
+        processed: false,
+        error: 'Chave de integração inválida',
+        notificationSent: false
+      })
+
+      // Manter apenas últimos 100 logs
+      if (db.webhookLogs.length > 100) {
+        db.webhookLogs = db.webhookLogs.slice(0, 100)
+      }
+
+      writeDB(db)
+      return res.status(401).json({ error: 'Chave de integração inválida' })
+    }
+  } else {
+    console.log('🧪 Teste local detectado - pulando validação de chave')
+  }
+
+  // Verificar se temos os dados necessários
+  if (!sale_order || !delivery) {
+    console.log('❌ Dados incompletos no webhook')
+    return res.status(400).json({ error: 'Dados incompletos' })
+  }
+
+  // 2. Buscar pedido pelo order_number
+  const orderIndex = db.orders.findIndex(o => o.id === sale_order.order_number)
+
+  // Se for teste local e pedido não existe, registrar como sucesso de teste
+  if (orderIndex === -1 && isLocalTest) {
+    console.log('🧪 Teste local - Pedido de teste não precisa existir no banco')
+
+    // Registrar log de teste bem-sucedido
+    if (!db.webhookLogs) db.webhookLogs = []
+    db.webhookLogs.unshift({
+      id: uuidv4(),
+      source: '123log',
+      receivedAt: new Date().toISOString(),
+      orderId: sale_order.order_number,
+      event: type || 'TRACKING_STATUS_CHANGED',
+      payload: req.body,
+      processed: true,
+      error: null,
+      notificationSent: false,
+      trackingCode: delivery.tracking_code,
+      deliveryStatus: delivery.status,
+      isTest: true
+    })
+
+    if (db.webhookLogs.length > 100) {
+      db.webhookLogs = db.webhookLogs.slice(0, 100)
+    }
+
+    writeDB(db)
+
+    console.log('✅ Webhook de teste processado com sucesso!')
+    return res.json({
+      success: true,
+      message: '🧪 Teste local processado com sucesso! Sistema funcionando corretamente.',
+      orderId: sale_order.order_number,
+      trackingCode: delivery.tracking_code,
+      deliveryStatus: delivery.status,
+      notificationSent: false,
+      isTest: true
+    })
+  }
+
+  if (orderIndex === -1) {
+    console.log('❌ Pedido não encontrado:', sale_order.order_number)
+
+    // Verificar se é pedido de teste (começa com TESTE-)
+    const isTestOrder = sale_order.order_number?.startsWith('TESTE-')
+
+    // Registrar log
+    if (!db.webhookLogs) db.webhookLogs = []
+    db.webhookLogs.unshift({
+      id: uuidv4(),
+      source: '123log',
+      receivedAt: new Date().toISOString(),
+      orderId: sale_order.order_number,
+      event: type || 'TRACKING_STATUS_CHANGED',
+      payload: req.body,
+      processed: isTestOrder, // Considera processado se for teste
+      error: isTestOrder ? null : 'Pedido não encontrado',
+      notificationSent: false,
+      trackingCode: delivery?.tracking_code || 'N/A',
+      deliveryStatus: delivery?.status || 'N/A',
+      isTest: isTestOrder
+    })
+
+    if (db.webhookLogs.length > 100) {
+      db.webhookLogs = db.webhookLogs.slice(0, 100)
+    }
+
+    writeDB(db)
+
+    // Se for teste, retorna sucesso mesmo sem pedido
+    if (isTestOrder) {
+      console.log('✅ Webhook de teste processado (pedido de teste não precisa existir)')
+      return res.json({
+        success: true,
+        message: 'Webhook de teste processado com sucesso',
+        orderId: sale_order.order_number,
+        trackingCode: delivery?.tracking_code,
+        deliveryStatus: delivery?.status,
+        notificationSent: false,
+        isTest: true
+      })
+    }
+
+    return res.status(404).json({ error: 'Pedido não encontrado' })
+  }
+
+  const order = db.orders[orderIndex]
+
+  // 3. Processar evento
+  const eventType = type || 'TRACKING_STATUS_CHANGED'
+
+  // Mapear status da 123Log para descrições legíveis
+  const statusMap = {
+    'IN_ANALYSIS': 'Em análise',
+    'IN_PRODUCTION': 'Em produção',
+    'READY_FOR_SHIPPING': 'Pronto para envio',
+    'SHIPPED': 'Enviado',
+    'IN_TRANSIT': 'Em trânsito',
+    'OUT_FOR_DELIVERY': 'Saiu para entrega',
+    'DELIVERED': 'Entregue',
+    'DELIVERY_FAILED': 'Falha na entrega',
+    'RETURNED': 'Devolvido',
+    'CANCELED': 'Cancelado'
+  }
+
+  // Adicionar ou atualizar código de rastreio
+  if (delivery.tracking_code && (!order.trackingCode || order.trackingCode !== delivery.tracking_code)) {
+    order.trackingCode = delivery.tracking_code
+    order.carrier = delivery.carrier || 'Não informado'
+    order.shippingInfo = {
+      carrier: delivery.carrier || 'Não informado',
+      service: delivery.service || '',
+      trackingCode: delivery.tracking_code,
+      addedAt: new Date().toISOString(),
+      addedBy: 'webhook_123log',
+      source: '123log',
+      promisedDeliveryDate: delivery.promised_delivery_date || null
+    }
+    console.log(`✅ Código de rastreio adicionado/atualizado: ${delivery.tracking_code}`)
+  }
+
+  // Inicializar histórico se não existir
+  if (!order.trackingHistory) order.trackingHistory = []
+
+  // Processar histórico completo da 123Log
+  if (delivery.history && Array.isArray(delivery.history)) {
+    // Adicionar todos os eventos do histórico que ainda não existem
+    delivery.history.forEach(event => {
+      // Verificar se já existe evento com a mesma data e descrição
+      const exists = order.trackingHistory.some(e =>
+        e.date === event.date &&
+        e.description === event.description
+      )
+
+      if (!exists) {
+        const trackingEvent = {
+          id: uuidv4(),
+          status: event.status || statusMap[delivery.status] || 'Atualização',
+          location: event.location || '',
+          date: event.date || new Date().toISOString(),
+          description: event.description || 'Atualização de rastreamento',
+          receivedAt: new Date().toISOString(),
+          source: '123log_webhook',
+          rawData: event
+        }
+
+        order.trackingHistory.push(trackingEvent)
+      }
+    })
+
+    // Ordenar histórico por data (mais recente primeiro)
+    order.trackingHistory.sort((a, b) => new Date(b.date) - new Date(a.date))
+  }
+
+  // Adicionar evento mais recente (last_event)
+  if (delivery.last_event) {
+    const lastEvent = delivery.last_event
+
+    // Verificar se já existe
+    const exists = order.trackingHistory.some(e =>
+      e.date === lastEvent.date &&
+      e.description === lastEvent.description
+    )
+
+    if (!exists) {
+      const trackingEvent = {
+        id: uuidv4(),
+        status: lastEvent.status || statusMap[delivery.status] || 'Atualização',
+        location: lastEvent.location || '',
+        date: lastEvent.date || new Date().toISOString(),
+        description: lastEvent.description || 'Atualização de rastreamento',
+        receivedAt: new Date().toISOString(),
+        source: '123log_webhook',
+        rawData: lastEvent
+      }
+
+      order.trackingHistory.unshift(trackingEvent)
+    }
+  }
+
+  order.updatedAt = new Date().toISOString()
+
+  // 4. Determinar evento para notificação
+  const deliveryStatus = delivery.status || 'IN_TRANSIT'
+  const eventForNotification = deliveryStatus.toLowerCase().replace(/_/g, '_')
+
+  // Mapear eventos da 123Log para eventos configurados
+  const eventMap = {
+    'shipped': 'objeto_postado',
+    'in_transit': 'em_transito',
+    'out_for_delivery': 'saiu_para_entrega',
+    'delivered': 'entregue',
+    'delivery_failed': 'tentativa_entrega'
+  }
+
+  const mappedEvent = eventMap[deliveryStatus.toLowerCase()] || eventForNotification
+
+  // 5. Verificar se deve notificar cliente via BotConversa
+  let notificationSent = false
+  const shouldNotify = integration.notificationSettings?.notifyViaBotConversa &&
+                       integration.notificationSettings?.eventsToNotify?.includes(mappedEvent)
+
+  if (shouldNotify && order.customer?.phone) {
+    try {
+      const lastEventData = delivery.last_event || delivery.history?.[delivery.history.length - 1]
+      const statusText = lastEventData?.status || statusMap[deliveryStatus] || deliveryStatus
+      const location = lastEventData?.location || 'Não informado'
+      const description = lastEventData?.description || ''
+      const eventDate = lastEventData?.date || new Date().toISOString()
+
+      // Formatar mensagem para BotConversa
+      const message = `🚚 *Atualização de Rastreio*\n\n📦 Pedido: #${order.id}\n🔢 Código: ${delivery.tracking_code}\n🚛 Transportadora: ${delivery.carrier}\n\n✅ *${statusText}*\nLocal: ${location}\nData: ${new Date(eventDate).toLocaleString('pt-BR')}\n\n${description}`
+
+      // Buscar webhook do BotConversa
+      const botconversaWebhook = db.webhooks?.find(w =>
+        w.product === 'all' &&
+        w.events?.includes('tracking_update') &&
+        w.userId === order.producerId
+      )
+
+      if (botconversaWebhook) {
+        const webhookPayload = {
+          phone: order.customer.phone,
+          message: message,
+          metadata: {
+            orderId: order.id,
+            eventType: 'shipping_update',
+            trackingCode: delivery.tracking_code,
+            carrier: delivery.carrier,
+            status: deliveryStatus,
+            source: '123log'
+          }
+        }
+
+        await fetch(botconversaWebhook.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(webhookPayload)
+        })
+
+        notificationSent = true
+        console.log(`📲 Cliente notificado via BotConversa: ${order.customer.phone}`)
+      }
+    } catch (error) {
+      console.error('❌ Erro ao notificar cliente:', error)
+    }
+  }
+
+  // 6. Salvar alterações
+  db.orders[orderIndex] = order
+
+  // 7. Registrar log do webhook
+  if (!db.webhookLogs) db.webhookLogs = []
+  db.webhookLogs.unshift({
+    id: uuidv4(),
+    source: '123log',
+    receivedAt: new Date().toISOString(),
+    orderId: sale_order.order_number,
+    event: type || 'TRACKING_STATUS_CHANGED',
+    payload: req.body,
+    processed: true,
+    error: null,
+    notificationSent: notificationSent,
+    trackingCode: delivery.tracking_code,
+    deliveryStatus: delivery.status
+  })
+
+  // Manter apenas últimos 100 logs
+  if (db.webhookLogs.length > 100) {
+    db.webhookLogs = db.webhookLogs.slice(0, 100)
+  }
+
+  writeDB(db)
+
+  console.log(`✅ Webhook 123Log processado com sucesso: ${sale_order.order_number} - ${delivery.tracking_code}`)
+  res.json({
+    success: true,
+    message: 'Webhook processado com sucesso',
+    orderId: sale_order.order_number,
+    trackingCode: delivery.tracking_code,
+    deliveryStatus: delivery.status,
+    notificationSent: notificationSent
+  })
+})
+
+// Sistema de email removido conforme solicitado
+
+console.log('⏰ Jobs agendados:');
+console.log('  - Rastreio Correios: a cada 15 minutos');
+console.log('  - Verificação de pagamento: a cada 5 minutos');
+console.log('  - Verificação AfterPay: diariamente às 00:00');
+console.log('  - Expiração PIX: a cada 1 hora');
+console.log('  - Expiração Boleto: diariamente às 06:00');
+
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`📊 API disponível em http://localhost:${PORT}/api`);
+  console.log(`💳 Endpoints de pagamento disponíveis:`);
+  console.log(`   - POST /api/payments/pix/generate`);
+  console.log(`   - POST /api/payments/boleto/generate`);
+  console.log(`   - POST /api/payments/credit-card/process`);
+});

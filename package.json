@@ -1,0 +1,45 @@
+{
+  "name": "pag2pay-backend",
+  "version": "1.0.0",
+  "description": "Backend API para plataforma Pag2Pay",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "verificar": "node verificar-config.js",
+    "check": "node verificar-config.js",
+    "build": "npm install && npx prisma generate",
+    "migrate": "npx prisma migrate deploy",
+    "migrate:dev": "npx prisma migrate dev",
+    "db:push": "npx prisma db push",
+    "db:seed": "node scripts/migrate-json-to-postgres.js",
+    "prisma:studio": "npx prisma studio",
+    "prisma:generate": "npx prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "axios": "^1.13.6",
+    "bcryptjs": "^3.0.3",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "https-proxy-agent": "^8.0.0",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.0",
+    "node-cron": "^3.0.3",
+    "node-fetch": "^2.7.0",
+    "qrcode": "^1.5.3",
+    "speakeasy": "^2.0.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

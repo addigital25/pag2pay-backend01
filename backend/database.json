@@ -1,0 +1,496 @@
+{
+  "users": [
+    {
+      "id": "1",
+      "email": "admin@pag2pay.com",
+      "password": "$2b$10$X48XuOpRwt/cNSzdc28Ise64piso9eadB8dPTXvjXnB68M4Kyb3sa",
+      "name": "Administrador Master",
+      "role": "admin",
+      "createdAt": "2026-02-28T02:06:29.547Z",
+      "status": "novo"
+    },
+    {
+      "id": "2",
+      "email": "usuario@pag2pay.com",
+      "password": "$2b$10$MJA4m0OMOK5RG5CiEdG.ne0MTRT01yxN/kwQPhHMqrXCWCH1lkzMq",
+      "name": "Usuário Teste",
+      "phone": "(11) 98765-4321",
+      "role": "user",
+      "status": "novo",
+      "commissionRate": 70,
+      "createdAt": "2026-02-28T02:06:29.547Z"
+    },
+    {
+      "id": "3",
+      "email": "carolina@email.com",
+      "password": "senha123",
+      "name": "Carolina Pires dos Santos",
+      "role": "user",
+      "phone": "(64) 99221-4255",
+      "commissionRate": 70,
+      "createdAt": "2026-03-10T10:00:00.000Z",
+      "status": "novo"
+    },
+    {
+      "id": "6b218ce5-6655-466c-a490-c3845d0b64eb",
+      "email": "joao@teste.com",
+      "password": "$2b$10$HEMOjLbpzKl3bfhWO8Cb..mAlLAlDPlmmwkA1KN.sI76htCXW7Hc6",
+      "name": "João Silva",
+      "phone": "11999999999",
+      "role": "user",
+      "commissionRate": 70,
+      "createdAt": "2026-03-11T20:20:25.443Z",
+      "status": "novo"
+    },
+    {
+      "id": "c9ba5b0f-6ada-4614-b0ae-efa4e1b394d0",
+      "email": "maria@teste.com",
+      "password": "$2b$10$p2jsLS.Im6QqN6RNX7qhh.Pc3.mpYVBASMEIa6hNlnwSrfnYN2EhK",
+      "name": "Maria Silva",
+      "phone": "11987654321",
+      "role": "user",
+      "commissionRate": 70,
+      "createdAt": "2026-03-11T20:38:26.413Z",
+      "status": "novo"
+    },
+    {
+      "id": "89a573cd-9547-4721-ab3a-9f4cb666e59a",
+      "email": "test@test.com",
+      "password": "$2b$10$irNWpF/sUcVZRXel7QnlQeQ4evEJ5Nzuoca5Q1dESm/f6.pBW2/1u",
+      "name": "Test User",
+      "phone": "11999999999",
+      "role": "user",
+      "commissionRate": 70,
+      "createdAt": "2026-03-12T03:28:15.250Z",
+      "status": "novo"
+    },
+    {
+      "id": "b54b1c1e-ebd7-4ca2-8f78-8487826a56d3",
+      "email": "teste.novo@email.com",
+      "password": "$2b$10$EB22QE3E5NeMhl/z4ZCI8.z.qQhlzGx9ZqfqdjHSnm/wgCRWHOKGe",
+      "name": "Teste Usuario Novo",
+      "phone": "11999998888",
+      "role": "user",
+      "commissionRate": 70,
+      "createdAt": "2026-03-12T11:43:27.403Z",
+      "status": "novo"
+    }
+  ],
+  "products": [
+    {
+      "id": "test-product-1",
+      "code": "projmw22",
+      "name": "NEW IN - Produto Teste",
+      "description": "Este é um produto de teste para verificar a vitrine",
+      "category": "Saúde, Bem-estar e Beleza",
+      "productType": "E-book",
+      "price": 197,
+      "image": "https://via.placeholder.com/400x300/059669/ffffff?text=NEW+IN",
+      "salesPageUrl": "https://exemplo.com",
+      "supportEmail": "suporte@exemplo.com",
+      "warrantyDays": 7,
+      "producerId": "2",
+      "producerName": "Usuário Demo",
+      "approvalStatus": "APROVADO",
+      "turbinaScore": 0,
+      "affiliateConfig": {
+        "participateInProgram": true,
+        "visibleInStore": true,
+        "autoApproval": true,
+        "affiliatesAccessAbandonment": true
+      },
+      "affiliateCommission": 15,
+      "checkoutConfig": {
+        "paymentMethods": {
+          "pix": true,
+          "boleto": true,
+          "creditCard": true,
+          "receiveAndPay": false
+        }
+      },
+      "paymentMethods": {
+        "pix": true,
+        "boleto": true,
+        "creditCard": true,
+        "afterPay": false
+      },
+      "plans": [],
+      "createdAt": "2026-03-10T21:36:05.201Z",
+      "updatedAt": "2026-03-10T21:36:05.201Z"
+    }
+  ],
+  "affiliations": [],
+  "orders": [],
+  "sales": [],
+  "userVerifications": [
+    {
+      "userId": "3",
+      "status": "pending",
+      "accountType": "pf",
+      "formData": {
+        "cpf": "043.782.441-10",
+        "birthDate": "1990-05-15",
+        "phone": "(64) 99221-4255",
+        "address": {
+          "zipCode": "74000-000",
+          "street": "Rua das Flores",
+          "number": "123",
+          "complement": "Apto 45",
+          "neighborhood": "Centro",
+          "city": "Goiânia",
+          "state": "GO"
+        }
+      },
+      "kyc": {
+        "emailCorporativo": "carolina@email.com",
+        "site": "https://carolinapires.com",
+        "telefoneComercial": "(64) 99221-4255",
+        "atuaInternacionalmente": "Sim",
+        "ticketMedio": 100,
+        "descricaoProdutos": "Infoprodutos e cursos online",
+        "status": "pending"
+      },
+      "documents": {
+        "selfie": "selfie_carolina.jpg",
+        "selfieUrl": "https://via.placeholder.com/400x300/059669/ffffff?text=Selfie",
+        "idFront": "rg_frente_carolina.jpg",
+        "idFrontUrl": "https://via.placeholder.com/400x300/059669/ffffff?text=RG+Frente",
+        "idBack": "rg_verso_carolina.jpg",
+        "idBackUrl": "https://via.placeholder.com/400x300/059669/ffffff?text=RG+Verso"
+      },
+      "documentos": {
+        "selfie": true,
+        "documentoFrente": true,
+        "documentoVerso": true,
+        "statusSelfie": "pending",
+        "statusDocumento": "pending"
+      },
+      "dadosBancarios": {
+        "banco": "341 - Itaú",
+        "tipoConta": "Corrente",
+        "agencia": "1234",
+        "conta": "12345-6",
+        "titular": "Carolina Pires dos Santos",
+        "cpfTitular": "043.782.441-10",
+        "status": "pending"
+      },
+      "editableByUser": null,
+      "rejectionReasons": [],
+      "createdAt": "2026-03-10T10:00:00.000Z",
+      "updatedAt": "2026-03-10T10:00:00.000Z"
+    }
+  ],
+  "platformUsers": [
+    {
+      "id": 1,
+      "name": "Carolina Pires dos Santos",
+      "email": "carolpsantos11@gmail.com",
+      "phone": "(64) 99221-4255",
+      "accountType": "pf",
+      "cpf": "043.782.441-10",
+      "status": "approved",
+      "pendingReason": null,
+      "kyc": {
+        "emailCorporativo": "carolpsantos11@gmail.com",
+        "site": "https://pag2pay.com",
+        "telefoneComercial": "(64) 99221-4255",
+        "atuaInternacionalmente": "Sim",
+        "ticketMedio": 100,
+        "descricaoProdutos": "Info produtos"
+      },
+      "enderecoPF": {
+        "cep": "74000-000",
+        "logradouro": "Rua das Flores",
+        "numero": "123",
+        "complemento": "Apto 45",
+        "bairro": "Centro",
+        "cidade": "Goiânia",
+        "estado": "GO"
+      },
+      "documentos": {
+        "selfie": true,
+        "documentoFrente": true,
+        "documentoVerso": true,
+        "statusSelfie": "approved",
+        "statusDocumento": "approved"
+      },
+      "dadosBancarios": {
+        "banco": "341 - Itaú",
+        "tipoConta": "Corrente",
+        "agencia": "1234",
+        "conta": "12345-6",
+        "titular": "Carolina Pires dos Santos",
+        "cpfTitular": "043.782.441-10",
+        "status": "approved"
+      },
+      "splitStatus": "active",
+      "splitAccountId": "rp_abc123def456",
+      "splitCreatedAt": "2024-02-16T10:30:00",
+      "createdAt": "2024-03-01",
+      "totalProducts": 3,
+      "totalSales": 12450,
+      "withdrawalLocked": false
+    },
+    {
+      "id": 2,
+      "name": "João Silva",
+      "email": "joao@email.com",
+      "phone": "(11) 98765-4321",
+      "accountType": "pf",
+      "cpf": "123.456.789-00",
+      "status": "pending",
+      "pendingReason": "Aguardando verificação de documentos",
+      "kyc": {
+        "emailCorporativo": "joao@empresa.com",
+        "site": "https://joaosilva.com",
+        "telefoneComercial": "(11) 98765-4321",
+        "atuaInternacionalmente": "Não",
+        "ticketMedio": 250,
+        "descricaoProdutos": "Cursos online de programação"
+      },
+      "enderecoPF": {
+        "cep": "01000-000",
+        "logradouro": "Av Paulista",
+        "numero": "1000",
+        "complemento": "Sala 10",
+        "bairro": "Bela Vista",
+        "cidade": "São Paulo",
+        "estado": "SP"
+      },
+      "documentos": {
+        "selfie": true,
+        "documentoFrente": true,
+        "documentoVerso": true,
+        "statusSelfie": "pending",
+        "statusDocumento": "pending"
+      },
+      "dadosBancarios": {
+        "banco": "001 - Banco do Brasil",
+        "tipoConta": "Corrente",
+        "agencia": "5678",
+        "conta": "98765-4",
+        "titular": "João Silva",
+        "cpfTitular": "123.456.789-00",
+        "status": "pending"
+      },
+      "splitStatus": "not_created",
+      "createdAt": "2024-03-02",
+      "totalProducts": 0,
+      "totalSales": 0,
+      "withdrawalLocked": false
+    },
+    {
+      "id": 3,
+      "name": "Tech Solutions LTDA",
+      "email": "contato@techsolutions.com",
+      "phone": "(21) 3456-7890",
+      "accountType": "pj",
+      "cnpj": "12.345.678/0001-90",
+      "status": "rejected",
+      "pendingReason": "Documentos de CNPJ inválidos",
+      "kyc": {
+        "emailCorporativo": "financeiro@techsolutions.com",
+        "site": "https://techsolutions.com.br",
+        "telefoneComercial": "(21) 3456-7890",
+        "atuaInternacionalmente": "Sim",
+        "ticketMedio": 5000,
+        "descricaoProdutos": "Soluções de software empresarial"
+      },
+      "empresario": {
+        "nome": "Carlos Alberto",
+        "cpf": "987.654.321-00",
+        "email": "carlos@techsolutions.com",
+        "telefone": "(21) 98765-4321"
+      },
+      "enderecoPJ": {
+        "cep": "20000-000",
+        "logradouro": "Av Rio Branco",
+        "numero": "500",
+        "complemento": "Sala 1001",
+        "bairro": "Centro",
+        "cidade": "Rio de Janeiro",
+        "estado": "RJ"
+      },
+      "documentos": {
+        "contratoSocial": true,
+        "carnaLeao": true,
+        "statusContratoSocial": "rejected",
+        "statusCarnaLeao": "approved"
+      },
+      "dadosBancarios": {
+        "banco": "237 - Bradesco",
+        "tipoConta": "Corrente",
+        "agencia": "9999",
+        "conta": "88888-8",
+        "titular": "Tech Solutions LTDA",
+        "cnpjTitular": "12.345.678/0001-90",
+        "status": "approved"
+      },
+      "splitStatus": "not_created",
+      "createdAt": "2024-03-01",
+      "totalProducts": 1,
+      "totalSales": 0,
+      "withdrawalLocked": true
+    }
+  ],
+  "platformProducts": [
+    {
+      "id": 1,
+      "name": "Curso de React Avançado",
+      "seller": "João Silva",
+      "sellerId": 123,
+      "price": 297,
+      "sales": 156,
+      "revenue": 46332,
+      "commission": 1389.96,
+      "status": "active",
+      "category": "Cursos",
+      "createdAt": "2024-01-15"
+    },
+    {
+      "id": 2,
+      "name": "E-book Marketing Digital",
+      "seller": "Maria Santos",
+      "sellerId": 456,
+      "price": 47,
+      "sales": 892,
+      "revenue": 41924,
+      "commission": 1257.72,
+      "status": "active",
+      "category": "E-books",
+      "createdAt": "2024-02-03"
+    },
+    {
+      "id": 3,
+      "name": "Template de Landing Page",
+      "seller": "Ana Oliveira",
+      "sellerId": 234,
+      "price": 97,
+      "sales": 0,
+      "revenue": 0,
+      "commission": 0,
+      "status": "pending",
+      "category": "Templates",
+      "createdAt": "2024-03-01",
+      "pendingReason": "Aguardando revisão de conteúdo"
+    },
+    {
+      "id": 4,
+      "name": "Curso de Node.js Completo",
+      "seller": "Carlos Mendes",
+      "sellerId": 567,
+      "price": 397,
+      "sales": 0,
+      "revenue": 0,
+      "commission": 0,
+      "status": "pending",
+      "category": "Cursos",
+      "createdAt": "2024-03-02",
+      "pendingReason": "Aguardando aprovação inicial"
+    },
+    {
+      "id": 5,
+      "name": "Workshop de Fotografia",
+      "seller": "Lucia Ferreira",
+      "sellerId": 890,
+      "price": 197,
+      "sales": 78,
+      "revenue": 15366,
+      "commission": 460.98,
+      "status": "suspended",
+      "category": "Workshops",
+      "createdAt": "2024-01-10",
+      "suspensionReason": "Múltiplas reclamações de clientes"
+    }
+  ],
+  "correiosContracts": [],
+  "logisticsIntegrations": {
+    "123log": {
+      "enabled": false,
+      "webhookKey": "",
+      "webhookUrl": "",
+      "notificationSettings": {
+        "notifyViaBotConversa": true,
+        "eventsToNotify": [
+          "codigo_adicionado",
+          "objeto_postado",
+          "em_transito",
+          "saiu_para_entrega",
+          "entregue"
+        ]
+      },
+      "createdAt": null,
+      "updatedAt": null
+    }
+  },
+  "webhookLogs": [],
+  "managers": [],
+  "orderCommissions": [],
+  "platformLogs": [
+    {
+      "id": 4,
+      "timestamp": "2026-03-12 11:43:27",
+      "level": "info",
+      "action": "Novo usuário registrado:",
+      "user": {
+        "userId": "b54b1c1e-ebd7-4ca2-8f78-8487826a56d3",
+        "email": "teste.novo@email.com",
+        "name": "Teste Usuario Novo"
+      },
+      "ip": "unknown",
+      "details": ""
+    },
+    {
+      "id": 3,
+      "timestamp": "2026-03-12 03:28:15",
+      "level": "info",
+      "action": "Novo usuário registrado:",
+      "user": {
+        "userId": "89a573cd-9547-4721-ab3a-9f4cb666e59a",
+        "email": "test@test.com",
+        "name": "Test User"
+      },
+      "ip": "unknown",
+      "details": ""
+    },
+    {
+      "id": 2,
+      "timestamp": "2026-03-11 20:38:26",
+      "level": "info",
+      "action": "Novo usuário registrado:",
+      "user": {
+        "userId": "c9ba5b0f-6ada-4614-b0ae-efa4e1b394d0",
+        "email": "maria@teste.com",
+        "name": "Maria Silva"
+      },
+      "ip": "unknown",
+      "details": ""
+    },
+    {
+      "id": 1,
+      "timestamp": "2026-03-11 20:20:25",
+      "level": "info",
+      "action": "Novo usuário registrado:",
+      "user": {
+        "userId": "6b218ce5-6655-466c-a490-c3845d0b64eb",
+        "email": "joao@teste.com",
+        "name": "João Silva"
+      },
+      "ip": "unknown",
+      "details": ""
+    }
+  ],
+  "platformAdmins": [
+    {
+      "id": "platform-admin-1",
+      "email": "admin@pag2pay.com",
+      "name": "Platform Admin",
+      "password": "$2b$10$X48XuOpRwt/cNSzdc28Ise64piso9eadB8dPTXvjXnB68M4Kyb3sa",
+      "userType": "platform-admin",
+      "twoFactorEnabled": true,
+      "twoFactorSecret": "IQRS6TKSFR4TARBTKJWGITJJH5UU2NCAHJMF23SUGRNW6M3PFA3A",
+      "createdAt": "2026-03-11T22:32:49.293Z",
+      "platform_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InBsYXRmb3JtLWFkbWluLTEiLCJlbWFpbCI6ImFkbWluQHBhZzJwYXkuY29tIiwicm9sZSI6InBsYXRmb3JtLWFkbWluIiwibmFtZSI6IlBsYXRmb3JtIEFkbWluIiwiaWF0IjoxNzczMzE2MDQzLCJleHAiOjE3NzM5MjA4NDN9.oW5R956Jmz1pznFAu4emN4kFA7sErgMzifz-ExjFA8U"
+    }
+  ]
+}

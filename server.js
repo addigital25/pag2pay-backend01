@@ -29,9 +29,14 @@ import bcrypt from 'bcryptjs';
 // Importar serviço do Pagar.me
 import pagarmeService from './services/pagarme.js';
 
-// Importar Prisma Client
+// Prisma Client para PostgreSQL
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
+
+// Verificar conexão com PostgreSQL
+prisma.$connect()
+  .then(() => console.log('✅ Conectado ao PostgreSQL via Prisma'))
+  .catch((err) => console.error('❌ Erro ao conectar no PostgreSQL:', err));
 
 // Carregar variáveis de ambiente
 dotenv.config();

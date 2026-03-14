@@ -224,18 +224,100 @@ function initDB() {
   }
 }
 
-function readDB() {
-  return JSON.parse(readFileSync(DB_FILE, 'utf-8'));
+// ===== FUNÇÕES DE BANCO DE DADOS (POSTGRESQL VIA PRISMA) =====
+
+async function readDB() {
+  try {
+    const snapshot = await prisma.databaseSnapshot.findUnique({
+      where: { id: 'singleton' }
+    });
+
+    if (snapshot && snapshot.data) {
+      return snapshot.data;
+    }
+
+    // Se não existe snapshot, retorna estrutura vazia
+    return {
+      users: [],
+      products: [],
+      orders: [],
+      pagarmeConfigs: [],
+      platformSettings: {
+        financial: {
+          invoicePrefix: 'PAG2PAY',
+          platformFees: {
+            pix: 3.67,
+            boleto: 3.67,
+            creditCard: 5.99
+          }
+        }
+      },
+      platformFeesByAcquirer: {},
+      withdrawals: [],
+      affiliations: [],
+      bankAccounts: [],
+      commissions: [],
+      transactions: [],
+      deletionRequests: [],
+      deletedProducts: []
+    };
+  } catch (error) {
+    console.error('❌ Erro ao ler banco de dados do PostgreSQL:', error);
+
+    // Fallback: tentar ler do arquivo database.json
+    try {
+      const data = fs.readFileSync(dbPath, 'utf-8');
+      console.log('⚠️  Usando database.json como fallback');
+      return JSON.parse(data);
+    } catch (fileError) {
+      console.error('❌ Erro ao ler database.json:', fileError);
+      return {
+        users: [],
+        products: [],
+        orders: [],
+        pagarmeConfigs: [],
+        platformSettings: {},
+        platformFeesByAcquirer: {},
+        withdrawals: []
+      };
+    }
+  }
 }
 
-function writeDB(data) {
-  writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+async function writeDB(data) {
+  try {
+    await prisma.databaseSnapshot.upsert({
+      where: { id: 'singleton' },
+      update: {
+        data: data,
+        updatedAt: new Date()
+      },
+      create: {
+        id: 'singleton',
+        data: data
+      }
+    });
+
+    console.log('✅ Dados salvos no PostgreSQL');
+
+    // Backup em arquivo (opcional)
+    try {
+      fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (fileError) {
+      console.log('⚠️  Backup em arquivo não disponível (normal no Railway)');
+    }
+
+    return true;
+  } catch (error) {
+    console.error('❌ Erro ao salvar banco de dados no PostgreSQL:', error);
+    throw error;
+  }
 }
 
 // Função auxiliar para buscar a chave da API Pagar.me do banco de dados
-function getPagarmeApiKey() {
+async function getPagarmeApiKey() {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     // Buscar configuração do platform-admin (configuração principal)
     const platformConfig = db.pagarmeConfigs?.find(c => c.userId === 'platform-admin');

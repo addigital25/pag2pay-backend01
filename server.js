@@ -3156,72 +3156,70 @@ app.get('/api/integrations/pagarme', (req, res) => {
 });
 
 // Salvar configuração Pagar.me
-app.post('/api/integrations/pagarme', (req, res) => {
-  console.log('\n📝 Recebendo requisição para salvar configuração Pagar.me...');
-  console.log('Body recebido:', { ...req.body, publicKey: req.body.publicKey ? '***' : '', privateKey: req.body.privateKey ? '***' : '' });
+app.post('/api/integrations/pagarme', async (req, res) => {
+  try {
+    console.log('\n📝 Recebendo requisição para salvar configuração Pagar.me...');
+    console.log('Body recebido:', { ...req.body, publicKey: req.body.publicKey ? '***' : '', privateKey: req.body.privateKey ? '***' : '' });
 
-  const db = readDB();
-  const {
-    userId,
-    publicKey,
-    privateKey,
-    webhookUrl,
-    splitReceiverId,
-    splitRate,
-    splitAnticipationRate,
-    credentialsLocked,
-    splitLocked,
-    enabled
-  } = req.body;
+    const {
+      userId,
+      publicKey,
+      privateKey,
+      webhookUrl,
+      splitReceiverId,
+      splitRate,
+      splitAnticipationRate,
+      credentialsLocked,
+      splitLocked,
+      enabled
+    } = req.body;
 
-  if (!userId) {
-    console.log('❌ Erro: userId ausente');
-    return res.status(400).json({ error: 'userId é obrigatório' });
+    if (!userId) {
+      console.log('❌ Erro: userId ausente');
+      return res.status(400).json({ error: 'userId é obrigatório' });
+    }
+
+    // Upsert (create ou update) no PostgreSQL via Prisma
+    const config = await prisma.pagarMeConfig.upsert({
+      where: { userId },
+      update: {
+        publicKey: publicKey || '',
+        privateKey: privateKey || '',
+        webhookUrl: webhookUrl || `https://app.pag2pay.com/api/v1/gateway/webhook/pagar_me/${userId}`,
+        splitReceiverId: splitReceiverId || '',
+        splitRate: splitRate || '3.67',
+        splitAnticipationRate: splitAnticipationRate || '',
+        credentialsLocked: credentialsLocked || false,
+        splitLocked: splitLocked || false,
+        enabled: enabled || false
+      },
+      create: {
+        userId,
+        publicKey: publicKey || '',
+        privateKey: privateKey || '',
+        webhookUrl: webhookUrl || `https://app.pag2pay.com/api/v1/gateway/webhook/pagar_me/${userId}`,
+        splitReceiverId: splitReceiverId || '',
+        splitRate: splitRate || '3.67',
+        splitAnticipationRate: splitAnticipationRate || '',
+        credentialsLocked: credentialsLocked || false,
+        splitLocked: splitLocked || false,
+        enabled: enabled || false
+      }
+    });
+
+    console.log('✅ Configuração Pagar.me salva no PostgreSQL para usuário:', userId);
+
+    res.json({
+      success: true,
+      config: {
+        ...config,
+        privateKey: config.privateKey ? '***' : '' // Não retornar chave privada completa
+      }
+    });
+  } catch (error) {
+    console.error('❌ Erro ao salvar configuração Pagar.me:', error);
+    res.status(500).json({ error: 'Erro ao salvar configuração' });
   }
-
-  if (!db.pagarmeConfigs) {
-    console.log('⚠️ Array pagarmeConfigs não existe, criando...');
-    db.pagarmeConfigs = [];
-  }
-
-  const existingIndex = db.pagarmeConfigs.findIndex(c => c.userId === userId);
-  console.log(`Configuração existente? ${existingIndex !== -1 ? `Sim (índice ${existingIndex})` : 'Não'}`);
-
-  const config = {
-    userId,
-    publicKey: publicKey || '',
-    privateKey: privateKey || '',
-    webhookUrl: webhookUrl || `https://app.pag2pay.com/api/v1/gateway/webhook/pagar_me/${userId}`,
-    splitReceiverId: splitReceiverId || '',
-    splitRate: splitRate || '3.67',
-    splitAnticipationRate: splitAnticipationRate || '',
-    credentialsLocked: credentialsLocked || false,
-    splitLocked: splitLocked || false,
-    enabled: enabled || false,
-    updatedAt: new Date().toISOString()
-  };
-
-  console.log('Configuração a ser salva:', {
-    ...config,
-    publicKey: config.publicKey ? `${config.publicKey.substring(0, 10)}...` : '',
-    privateKey: config.privateKey ? '***OCULTA***' : ''
-  });
-
-  if (existingIndex !== -1) {
-    db.pagarmeConfigs[existingIndex] = config;
-  } else {
-    db.pagarmeConfigs.push(config);
-  }
-
-  writeDB(db);
-
-  console.log(`✅ Configuração Pagar.me ${existingIndex !== -1 ? 'atualizada' : 'criada'} para usuário ${userId}`);
-  console.log(`📊 Total de configurações Pagar.me no banco: ${db.pagarmeConfigs.length}`);
-
-  res.json({ success: true, config: {
-    ...config,
-    privateKey: config.privateKey ? '***' : '' // Não retornar chave privada completa
-  }});
 });
 
 // Deletar configuração Pagar.me

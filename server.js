@@ -61,6 +61,7 @@ const allowedOrigins = [
   'http://localhost:5173',
   'https://dist-cxy.pages.dev',
   'https://pag2pay-frontend-v2.pages.dev',
+  'https://13e58926.dist-cxy.pages.dev',
   process.env.FRONTEND_URL,
   process.env.ADMIN_URL
 ].filter(Boolean);

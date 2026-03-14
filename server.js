@@ -10831,6 +10831,110 @@ console.log('  - Verificação AfterPay: diariamente às 00:00');
 console.log('  - Expiração PIX: a cada 1 hora');
 console.log('  - Expiração Boleto: diariamente às 06:00');
 
+// ==================== ENDPOINT DE MIGRAÃ‡ÃƒO - ADICIONE NO server.js ====================
+// Cole este cÃ³digo ANTES de app.listen() no final do server.js
+
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+
+app.post('/api/admin/migrate-database', async (req, res) => {
+  console.log('ðŸš€ Iniciando migraÃ§Ã£o manual do database.json...');
+
+  try {
+    const db = readDB();
+    let migrated = {
+      users: 0,
+      products: 0,
+      orders: 0,
+      commissions: 0
+    };
+
+    // Migrar usuÃ¡rios
+    for (const user of db.users || []) {
+      await prisma.user.upsert({
+        where: { id: user.id },
+        update: {
+          email: user.email,
+          password: user.password,
+          name: user.name,
+          role: user.role,
+          phone: user.phone || null,
+          commissionRate: user.commissionRate || 70,
+          status: user.status || 'novo',
+        },
+        create: {
+          id: user.id,
+          email: user.email,
+          password: user.password,
+          name: user.name,
+          role: user.role,
+          phone: user.phone || null,
+          commissionRate: user.commissionRate || 70,
+          status: user.status || 'novo',
+          createdAt: user.createdAt ? new Date(user.createdAt) : new Date(),
+        }
+      });
+      migrated.users++;
+    }
+
+    // Migrar produtos
+    for (const product of db.products || []) {
+      await prisma.product.upsert({
+        where: { id: product.id },
+        update: {
+          code: product.code,
+          name: product.name,
+          description: product.description,
+          category: product.category,
+          productType: product.productType,
+          price: product.price,
+          image: product.image,
+          salesPageUrl: product.salesPageUrl,
+          supportEmail: product.supportEmail,
+          producerId: product.producerId,
+          producerName: product.producerName,
+          approvalStatus: product.approvalStatus || 'APROVADO',
+        },
+        create: {
+          id: product.id,
+          code: product.code,
+          name: product.name,
+          description: product.description,
+          category: product.category,
+          productType: product.productType,
+          price: product.price,
+          image: product.image || '',
+          salesPageUrl: product.salesPageUrl || '',
+          supportEmail: product.supportEmail || '',
+          producerId: product.producerId,
+          producerName: product.producerName || 'Produtor',
+          approvalStatus: product.approvalStatus || 'APROVADO',
+        }
+      });
+      migrated.products++;
+    }
+
+    console.log('âœ… MigraÃ§Ã£o concluÃ­da!');
+    console.log(`   - UsuÃ¡rios: ${migrated.users}`);
+    console.log(`   - Produtos: ${migrated.products}`);
+
+    res.json({
+      success: true,
+      message: 'MigraÃ§Ã£o concluÃ­da com sucesso!',
+      migrated
+    });
+
+  } catch (error) {
+    console.error('âŒ Erro na migraÃ§Ã£o:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ======================================================================================
+
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📊 API disponível em http://localhost:${PORT}/api`);

@@ -40,10 +40,26 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DB_FILE = './database.json';
 
-// Configuração CORS para produção
+/// ========================================
+// COPIE ESTE CÃ“DIGO E COLE NO SEU server.js
+// ========================================
+//
+// LOCALIZAÃ‡ÃƒO: Procure por "ConfiguraÃ§Ã£o CORS" no arquivo backend/server.js
+// LINHAS: Por volta da linha 39-59
+//
+// SUBSTITUA TODO O BLOCO que comeÃ§a com:
+//   "// ConfiguraÃ§Ã£o CORS para produÃ§Ã£o"
+//
+// ATÃ‰ O FINAL do:
+//   app.use(cors({ ... }));
+//
+// ========================================
+
+// ConfiguraÃ§Ã£o CORS para produÃ§Ã£o
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
+  'https://dist-cxy.pages.dev',
   'https://pag2pay-frontend-v2.pages.dev',
   process.env.FRONTEND_URL,
   process.env.ADMIN_URL
@@ -51,7 +67,7 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function(origin, callback) {
-    // Permite requisições sem origin (mobile apps, postman, etc)
+    // Permite requisiÃ§Ãµes sem origin (mobile apps, postman, etc)
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
@@ -62,6 +78,10 @@ app.use(cors({
   },
   credentials: true
 }));
+
+// ========================================
+// FIM DO CÃ“DIGO - Salve o arquivo apÃ³s colar
+// ========================================
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));

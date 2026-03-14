@@ -472,6 +472,31 @@ model PlatformSettings {
   @@map("platform_settings")
 }
 
+// ==================== INTEGRAÇÕES PAGAR.ME ====================
+
+model PagarMeConfig {
+  id                      String    @id @default(uuid())
+  userId                  String    @unique
+
+  publicKey               String?
+  privateKey              String?
+  webhookUrl              String?
+
+  splitReceiverId         String?
+  splitRate               String?   @default("3.67")
+  splitAnticipationRate   String?
+
+  credentialsLocked       Boolean   @default(false)
+  splitLocked             Boolean   @default(false)
+  enabled                 Boolean   @default(false)
+
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("pagarme_configs")
+}
+
 // ==================== LOGS ====================
 
 model Log {

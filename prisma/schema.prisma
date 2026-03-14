@@ -18,6 +18,8 @@ model User {
   password         String
   name             String
   role             String    @default("user") // user, admin
+  phone            String?
+  status           String?   @default("novo")
   commissionRate   Int?      @default(70)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

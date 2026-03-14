@@ -9,7 +9,7 @@
     "dev": "node server.js",
     "verificar": "node verificar-config.js",
     "check": "node verificar-config.js",
-    "build": "npm install && npx prisma generate",
+    "build": "npm install && npx prisma generate && npx prisma db push --accept-data-loss && node scripts/migrate-json-to-postgres.js",
     "migrate": "npx prisma migrate deploy",
     "migrate:dev": "npx prisma migrate dev",
     "db:push": "npx prisma db push",

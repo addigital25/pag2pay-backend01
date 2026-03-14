@@ -3413,7 +3413,7 @@ app.post('/api/integrations/pagarme/create-recipient', async (req, res) => {
       db.users[userIndex].splitAccountId = result.id;
       db.users[userIndex].splitStatus = 'active';
       db.users[userIndex].splitCreatedAt = new Date().toISOString();
-      writeDB(db);
+      await writeDB(db);
     }
 
     res.json({
@@ -3435,7 +3435,7 @@ app.post('/api/integrations/pagarme/create-recipient', async (req, res) => {
 app.post('/api/integrations/pagarme/create-order-with-split', async (req, res) => {
   console.log('\n💳 Criando pedido com split na Pagar.me...');
 
-  const db = readDB();
+  const db = await readDB();
   const { orderId, paymentMethod } = req.body;
 
   if (!orderId) {
@@ -3564,7 +3564,7 @@ app.post('/api/integrations/pagarme/create-order-with-split', async (req, res) =
         boletoUrl: result.charges?.[0]?.last_transaction?.url,
         barcode: result.charges?.[0]?.last_transaction?.line
       };
-      writeDB(db);
+      await writeDB(db);
     }
 
     res.json({
@@ -3594,7 +3594,7 @@ app.post('/api/integrations/pagarme/create-order-with-split', async (req, res) =
 app.get('/api/integrations/pagarme/payables', async (req, res) => {
   console.log('\n📊 Buscando recebíveis do Pagar.me...');
 
-  const db = readDB();
+  const db = await readDB();
   const { userId } = req.query;
 
   if (!userId) {
@@ -4250,7 +4250,7 @@ app.patch('/api/users/:id', (req, res) => {
     updatedAt: new Date().toISOString()
   };
 
-  writeDB(db);
+  (db);
 
   const { password, ...userWithoutPassword } = db.users[userIndex];
   res.json(userWithoutPassword);
@@ -4265,7 +4265,7 @@ app.delete('/api/users/:id', (req, res) => {
   }
 
   db.users.splice(userIndex, 1);
-  writeDB(db);
+  (db);
 
   res.json({ success: true, message: 'Usuário excluído com sucesso' });
 });
@@ -4382,7 +4382,7 @@ app.post('/api/users/:userId/create-recipient', async (req, res) => {
 
     // Marcar status como pending
     db.users[userIndex].splitStatus = 'pending';
-    writeDB(db);
+    (db);
 
     // Criar recipient na Pagar.me
     console.log(`👤 Criando recipient para usuário ${userId}...`);
@@ -4390,7 +4390,7 @@ app.post('/api/users/:userId/create-recipient', async (req, res) => {
     const apiKey = getPagarmeApiKey();
     if (!apiKey) {
       db.users[userIndex].splitStatus = 'not_created';
-      writeDB(db);
+      (db);
 
       return res.status(500).json({
         success: false,
@@ -4427,7 +4427,7 @@ app.post('/api/users/:userId/create-recipient', async (req, res) => {
       db.users[userIndex].bankAccount = bankAccount;
       db.users[userIndex].updatedAt = new Date().toISOString();
 
-      writeDB(db);
+      (db);
 
       console.log(`💾 Recipient salvo no usuário em múltiplos formatos para compatibilidade`);
       console.log(`   user.pagarme.recipientId: ${recipient.recipientId}`);
@@ -4447,7 +4447,7 @@ app.post('/api/users/:userId/create-recipient', async (req, res) => {
 
       // Voltar status para not_created
       db.users[userIndex].splitStatus = 'not_created';
-      writeDB(db);
+      (db);
 
       // Extrair mensagem de erro mais específica
       let errorMessage = 'Erro ao criar recebedor na Pagar.me';
@@ -4582,7 +4582,7 @@ app.post('/api/users/:userId/disconnect-recipient', async (req, res) => {
     delete db.users[userIndex].splitCreatedAt;
     db.users[userIndex].splitStatus = 'not_created';
     db.users[userIndex].updatedAt = new Date().toISOString();
-    writeDB(db);
+    (db);
 
     res.json({
       success: true,
@@ -4814,7 +4814,7 @@ app.post('/api/users/:userId/withdraw', async (req, res) => {
     };
 
     db.withdrawals.push(withdrawal);
-    writeDB(db);
+    (db);
 
     console.log(`✅ Saque criado: ${withdrawal.id} - ${transfers.length} transferências`);
 

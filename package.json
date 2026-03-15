@@ -1,49 +1,33 @@
 {
   "name": "pag2pay-backend",
   "version": "1.0.0",
-  "description": "Backend API para plataforma Pag2Pay",
+  "description": "Backend do Pag2Pay - Gateway de Pagamentos",
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
+    "start": "node prisma/seed.js && node server.js",
     "dev": "node server.js",
-    "verificar": "node verificar-config.js",
-    "check": "node verificar-config.js",
-    "build": "npm install && npx prisma generate && npx prisma db push --accept-data-loss && node scripts/migrate-json-to-postgres.js",
-    "migrate": "npx prisma migrate deploy",
-    "migrate:dev": "npx prisma migrate dev",
-    "db:push": "npx prisma db push",
-    "db:seed": "node scripts/migrate-json-to-postgres.js",
-    "prisma:studio": "npx prisma studio",
-    "prisma:generate": "npx prisma generate",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "prisma:generate": "npx prisma generate"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "axios": "^1.13.6",
-    "bcryptjs": "^3.0.3",
-    "cheerio": "^1.2.0",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
-    "dotenv": "^16.0.3",
-    "express": "^4.18.2",
-    "https-proxy-agent": "^8.0.0",
-    "ioredis": "^5.4.1",
-    "jsonwebtoken": "^9.0.3",
-    "multer": "^2.1.0",
-    "node-cron": "^3.0.3",
-    "node-fetch": "^2.7.0",
-    "qrcode": "^1.5.3",
-    "speakeasy": "^2.0.0",
-    "uuid": "^9.0.0"
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "jsonwebtoken": "^9.0.2",
+    "pagarme": "^4.20.0",
+    "qrcode": "^1.5.4",
+    "speakeasy": "^2.0.0"
   },
   "devDependencies": {
     "prisma": "^5.22.0"
-  },
-  "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
   }
 }

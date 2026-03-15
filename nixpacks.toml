@@ -1,8 +1,12 @@
-[phases.setup]
-nixPkgs = ["nodejs_20"]
-
 [phases.install]
-cmds = ["npm install"]
+cmds = [
+  "npm install --legacy-peer-deps"
+]
+
+[phases.build]
+cmds = [
+  "npx prisma generate"
+]
 
 [start]
-cmd = "node server.js"
+cmd = "node prisma/seed.js && node server.js"

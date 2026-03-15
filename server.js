@@ -241,9 +241,11 @@ async function readDB() {
     });
 
     if (snapshot && snapshot.data) {
+      console.log(`📊 Dados lidos do PostgreSQL - Users: ${snapshot.data.users?.length || 0}, Products: ${snapshot.data.products?.length || 0}`);
       return snapshot.data;
     }
 
+    console.log('⚠️  Nenhum snapshot encontrado no PostgreSQL - retornando dados vazios');
     return {
       users: [],
       products: [],
@@ -10961,6 +10963,51 @@ app.post('/api/admin/force-migrate-data', async (req, res) => {
       success: false,
       error: 'Erro ao migrar dados',
       details: error.message
+    });
+  }
+});
+
+// =====================================================
+// ENDPOINT DE DEBUG: VERIFICAR DADOS NO POSTGRESQL
+// =====================================================
+app.get('/api/admin/debug-database', async (req, res) => {
+  try {
+    console.log('🔍 Verificando dados no PostgreSQL...');
+
+    // Buscar diretamente do Prisma
+    const snapshot = await prisma.databaseSnapshot.findUnique({
+      where: { id: 'singleton' }
+    });
+
+    if (!snapshot) {
+      return res.json({
+        success: false,
+        message: 'Nenhum snapshot encontrado no PostgreSQL',
+        snapshot: null
+      });
+    }
+
+    const data = snapshot.data;
+
+    res.json({
+      success: true,
+      message: 'Snapshot encontrado!',
+      stats: {
+        users: data.users?.length || 0,
+        products: data.products?.length || 0,
+        orders: data.orders?.length || 0,
+        pagarmeConfigs: data.pagarmeConfigs?.length || 0
+      },
+      users: data.users?.map(u => ({ id: u.id, email: u.email, name: u.name, role: u.role })) || [],
+      createdAt: snapshot.createdAt,
+      updatedAt: snapshot.updatedAt
+    });
+
+  } catch (error) {
+    console.error('❌ Erro ao verificar database:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

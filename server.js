@@ -33,9 +33,39 @@ import pagarmeService from './services/pagarme.js';
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
-// Verificar conexão com PostgreSQL
+// Verificar conexão com PostgreSQL e migrar dados automaticamente
 prisma.$connect()
-  .then(() => console.log('✅ Conectado ao PostgreSQL via Prisma'))
+  .then(async () => {
+    console.log('✅ Conectado ao PostgreSQL via Prisma');
+
+    // Migrar dados do database.json para PostgreSQL (se necessário)
+    try {
+      const snapshot = await prisma.databaseSnapshot.findUnique({
+        where: { id: 'singleton' }
+      });
+
+      // Se não existe snapshot, migrar do database.json
+      if (!snapshot && existsSync(DB_FILE)) {
+        console.log('📦 Migrando dados do database.json para PostgreSQL...');
+        const fileData = JSON.parse(readFileSync(DB_FILE, 'utf-8'));
+
+        await prisma.databaseSnapshot.create({
+          data: {
+            id: 'singleton',
+            data: fileData
+          }
+        });
+
+        console.log('✅ Dados migrados com sucesso para PostgreSQL!');
+      } else if (snapshot) {
+        console.log('✅ Dados já estão no PostgreSQL');
+      } else {
+        console.log('ℹ️  Nenhum dado para migrar');
+      }
+    } catch (migrationError) {
+      console.error('⚠️  Erro na migração automática:', migrationError.message);
+    }
+  })
   .catch((err) => console.error('❌ Erro ao conectar no PostgreSQL:', err));
 
 // Carregar variáveis de ambiente

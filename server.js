@@ -10965,6 +10965,69 @@ app.post('/api/admin/force-migrate-data', async (req, res) => {
   }
 });
 
+// =====================================================
+// ENDPOINT ESPECIAL: CRIAR USUÁRIO ADMIN PADRÃO
+// =====================================================
+app.post('/api/admin/create-default-admin', async (req, res) => {
+  try {
+    console.log('👤 Criando usuário admin padrão...');
+
+    const db = await readDB();
+
+    // Verificar se admin já existe
+    const adminExists = db.users?.some(u => u.email === 'admin@pag2pay.com');
+
+    if (adminExists) {
+      return res.json({
+        success: true,
+        message: 'Usuário admin já existe',
+        existing: true
+      });
+    }
+
+    // Criar senha hash
+    const hashedPassword = await bcrypt.hash('admin123', 10);
+
+    // Criar usuário admin
+    const adminUser = {
+      id: uuidv4(),
+      email: 'admin@pag2pay.com',
+      password: hashedPassword,
+      name: 'Administrador',
+      role: 'admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (!db.users) {
+      db.users = [];
+    }
+
+    db.users.push(adminUser);
+
+    await writeDB(db);
+
+    console.log('✅ Usuário admin criado com sucesso!');
+
+    res.json({
+      success: true,
+      message: 'Usuário admin criado com sucesso!',
+      credentials: {
+        email: 'admin@pag2pay.com',
+        password: 'admin123'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Erro ao criar admin:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao criar usuário admin',
+      details: error.message
+    });
+  }
+});
+
 console.log('⏰ Jobs agendados:');
 console.log('  - Rastreio Correios: a cada 15 minutos');
 console.log('  - Verificação de pagamento: a cada 5 minutos');

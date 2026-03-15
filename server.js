@@ -301,7 +301,7 @@ async function getPagarmeApiKey() {
 }
 
 // Função auxiliar para buscar o Recipient ID da plataforma do banco de dados
-function getPlatformRecipientId() {
+async function getPlatformRecipientId() {
   try {
     const db = await readDB();
 
@@ -601,7 +601,7 @@ function calculateUserBalance(userId, db) {
  * @param {number} params.affiliateCommission - Comissão do afiliado em % (opcional)
  * @returns {Object} - Objeto com valores calculados e splits
  */
-function calculatePlatformSplits(params) {
+async function calculatePlatformSplits(params) {
   const {
     totalAmount,
     paymentMethod,
@@ -1697,7 +1697,7 @@ app.post('/api/orders', async (req, res) => {
     }
   }
 
-  const splitCalculation = calculatePlatformSplits({
+  const splitCalculation = await calculatePlatformSplits({
     totalAmount: totalValue,
     paymentMethod: paymentMethod,
     installments: installments,
@@ -5974,7 +5974,7 @@ app.patch('/api/users/:userId/notification-settings', async (req, res) => {
 });
 
 // Função helper para criar notificação (será usada por outras rotas)
-function createNotification(userId, type, title, message, metadata = {}) {
+async function createNotification(userId, type, title, message, metadata = {}) {
   const db = await readDB();
 
   if (!db.notifications) {
@@ -5996,7 +5996,7 @@ function createNotification(userId, type, title, message, metadata = {}) {
   };
 
   db.notifications.push(notification);
-  writeDB(db);
+  await writeDB(db);
 
   return notification;
 }
@@ -7202,7 +7202,7 @@ app.post('/api/webhooks/tracking', async (req, res) => {
 // Jobs automáticos com cron
 
 // Job de rastreio Correios - a cada 15 minutos
-cron.schedule('*/15 * * * *', () => {
+cron.schedule('*/15 * * * *', async () => {
   console.log('🚚 Executando job de rastreio Correios...');
   const db = await readDB();
 
@@ -7220,7 +7220,7 @@ cron.schedule('*/15 * * * *', () => {
 });
 
 // Job de verificação de pagamento - a cada 5 minutos (fallback)
-cron.schedule('*/5 * * * *', () => {
+cron.schedule('*/5 * * * *', async () => {
   console.log('💰 Executando job de verificação de pagamento...');
   const db = await readDB();
 
@@ -7237,7 +7237,7 @@ cron.schedule('*/5 * * * *', () => {
 });
 
 // Job de verificação de atraso AfterPay - diariamente às 00:00
-cron.schedule('0 0 * * *', () => {
+cron.schedule('0 0 * * *', async () => {
   console.log('⏰ Executando job de verificação de atraso AfterPay...');
   const db = await readDB();
   let updated = false;
@@ -7279,7 +7279,7 @@ cron.schedule('0 0 * * *', () => {
 });
 
 // Job de expiração PIX - a cada 1 hora
-cron.schedule('0 * * * *', () => {
+cron.schedule('0 * * * *', async () => {
   console.log('💎 Executando job de expiração PIX...');
   const db = await readDB();
   let updated = false;
@@ -7311,7 +7311,7 @@ cron.schedule('0 * * * *', () => {
 });
 
 // Job de expiração Boleto - diariamente às 06:00
-cron.schedule('0 6 * * *', () => {
+cron.schedule('0 6 * * *', async () => {
   console.log('🏦 Executando job de expiração Boleto...');
   const db = await readDB();
   let updated = false;
@@ -7344,7 +7344,7 @@ cron.schedule('0 6 * * *', () => {
 });
 
 // Job de atualização de Turbina Scores - a cada 1 hora
-cron.schedule('0 * * * *', () => {
+cron.schedule('0 * * * *', async () => {
   console.log('⚡ Executando job de atualização de Turbina Scores...');
   try {
     const updated = turbinaScoreService.updateAllTurbinaScores();
@@ -7355,7 +7355,7 @@ cron.schedule('0 * * * *', () => {
 });
 
 // Job de detecção de carrinhos abandonados - a cada 30 minutos
-cron.schedule('*/30 * * * *', () => {
+cron.schedule('*/30 * * * *', async () => {
   console.log('🛒 Executando job de detecção de carrinhos abandonados...');
   const db = await readDB();
   let updated = false;
@@ -7781,7 +7781,7 @@ app.post('/api/payments/pix/generate', async (req, res) => {
       })
     }
 
-    const platformRecipientId = getPlatformRecipientId()
+    const platformRecipientId = await getPlatformRecipientId()
     if (!platformRecipientId) {
       console.error('❌ PAGARME_PLATFORM_RECIPIENT_ID não configurado')
       return res.status(500).json({
@@ -7914,7 +7914,7 @@ app.post('/api/payments/boleto/generate', async (req, res) => {
       })
     }
 
-    const platformRecipientId = getPlatformRecipientId()
+    const platformRecipientId = await getPlatformRecipientId()
     if (!platformRecipientId) {
       console.error('❌ PAGARME_PLATFORM_RECIPIENT_ID não configurado')
       return res.status(500).json({
@@ -8135,7 +8135,7 @@ app.post('/api/payments/credit-card/process', async (req, res) => {
       })
     }
 
-    const platformRecipientId = getPlatformRecipientId()
+    const platformRecipientId = await getPlatformRecipientId()
     if (!platformRecipientId) {
       console.error('❌ PAGARME_PLATFORM_RECIPIENT_ID não configurado')
       return res.status(500).json({
@@ -10582,7 +10582,7 @@ app.post('/api/platform/settings/images', upload.fields([
   { name: 'favicon', maxCount: 1 },
   { name: 'logo', maxCount: 1 },
   { name: 'achievementLogo', maxCount: 1 }
-]), (req, res) => {
+]), async (req, res) => {
   try {
     const db = await readDB();
 

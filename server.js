@@ -45,35 +45,19 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DB_FILE = './database.json';
 
-/// ========================================
-// COPIE ESTE CÃ“DIGO E COLE NO SEU server.js
-// ========================================
-//
-// LOCALIZAÃ‡ÃƒO: Procure por "ConfiguraÃ§Ã£o CORS" no arquivo backend/server.js
-// LINHAS: Por volta da linha 39-59
-//
-// SUBSTITUA TODO O BLOCO que comeÃ§a com:
-//   "// ConfiguraÃ§Ã£o CORS para produÃ§Ã£o"
-//
-// ATÃ‰ O FINAL do:
-//   app.use(cors({ ... }));
-//
-// ========================================
-
-// ConfiguraÃ§Ã£o CORS para produÃ§Ã£o
+// Configuração CORS para produção
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'https://dist-cxy.pages.dev',
   'https://pag2pay-frontend-v2.pages.dev',
-  'https://13e58926.dist-cxy.pages.dev',
   process.env.FRONTEND_URL,
   process.env.ADMIN_URL
 ].filter(Boolean);
 
 app.use(cors({
   origin: function(origin, callback) {
-    // Permite requisiÃ§Ãµes sem origin (mobile apps, postman, etc)
+    // Permite requisições sem origin (mobile apps, postman, etc)
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
@@ -84,10 +68,6 @@ app.use(cors({
   },
   credentials: true
 }));
-
-// ========================================
-// FIM DO CÃ“DIGO - Salve o arquivo apÃ³s colar
-// ========================================
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -224,8 +204,6 @@ function initDB() {
   }
 }
 
-// ===== FUNÇÕES DE BANCO DE DADOS (POSTGRESQL VIA PRISMA) =====
-
 async function readDB() {
   try {
     const snapshot = await prisma.databaseSnapshot.findUnique({
@@ -236,7 +214,6 @@ async function readDB() {
       return snapshot.data;
     }
 
-    // Se não existe snapshot, retorna estrutura vazia
     return {
       users: [],
       products: [],
@@ -245,11 +222,7 @@ async function readDB() {
       platformSettings: {
         financial: {
           invoicePrefix: 'PAG2PAY',
-          platformFees: {
-            pix: 3.67,
-            boleto: 3.67,
-            creditCard: 5.99
-          }
+          platformFees: { pix: 3.67, boleto: 3.67, creditCard: 5.99 }
         }
       },
       platformFeesByAcquirer: {},
@@ -262,24 +235,13 @@ async function readDB() {
       deletedProducts: []
     };
   } catch (error) {
-    console.error('❌ Erro ao ler banco de dados do PostgreSQL:', error);
-
-    // Fallback: tentar ler do arquivo database.json
+    console.error('❌ Erro ao ler PostgreSQL:', error);
     try {
-      const data = fs.readFileSync(dbPath, 'utf-8');
+      const data = readFileSync(DB_FILE, 'utf-8');
       console.log('⚠️  Usando database.json como fallback');
       return JSON.parse(data);
     } catch (fileError) {
-      console.error('❌ Erro ao ler database.json:', fileError);
-      return {
-        users: [],
-        products: [],
-        orders: [],
-        pagarmeConfigs: [],
-        platformSettings: {},
-        platformFeesByAcquirer: {},
-        withdrawals: []
-      };
+      return { users: [], products: [], orders: [], pagarmeConfigs: [], platformSettings: {}, platformFeesByAcquirer: {}, withdrawals: [] };
     }
   }
 }
@@ -288,28 +250,18 @@ async function writeDB(data) {
   try {
     await prisma.databaseSnapshot.upsert({
       where: { id: 'singleton' },
-      update: {
-        data: data,
-        updatedAt: new Date()
-      },
-      create: {
-        id: 'singleton',
-        data: data
-      }
+      update: { data: data, updatedAt: new Date() },
+      create: { id: 'singleton', data: data }
     });
-
     console.log('✅ Dados salvos no PostgreSQL');
-
-    // Backup em arquivo (opcional)
     try {
-      fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf-8');
+      writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
     } catch (fileError) {
-      console.log('⚠️  Backup em arquivo não disponível (normal no Railway)');
+      console.log('⚠️  Backup em arquivo não disponível');
     }
-
     return true;
   } catch (error) {
-    console.error('❌ Erro ao salvar banco de dados no PostgreSQL:', error);
+    console.error('❌ Erro ao salvar no PostgreSQL:', error);
     throw error;
   }
 }
@@ -351,7 +303,7 @@ async function getPagarmeApiKey() {
 // Função auxiliar para buscar o Recipient ID da plataforma do banco de dados
 function getPlatformRecipientId() {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     // Buscar configuração do platform-admin (configuração principal)
     const platformConfig = db.pagarmeConfigs?.find(c => c.userId === 'platform-admin');
@@ -661,7 +613,7 @@ function calculatePlatformSplits(params) {
     selectedPlan = null
   } = params;
 
-  const db = readDB();
+  const db = await readDB();
 
   // Buscar taxas da plataforma
   const platformFees = db.platformFees || {};
@@ -940,7 +892,7 @@ app.use('/api/achievements', achievementsRoutes);
 app.get('/api/platform/financial-stats', async (req, res) => {
   console.log('\n📊 Buscando estatísticas financeiras da plataforma...');
 
-  const db = readDB();
+  const db = await readDB();
 
   try {
     // Calcular estatísticas baseadas em pedidos reais
@@ -1136,7 +1088,7 @@ app.get('/api/platform/financial-stats', async (req, res) => {
 
 // Login de Usuário
 app.post('/api/auth/login/user', async (req, res) => {
-  const db = readDB();
+  const db = await readDB();
   const { email, password } = req.body;
 
   const user = db.users.find(u => u.email === email && u.role === 'user');
@@ -1162,7 +1114,7 @@ app.post('/api/auth/login/user', async (req, res) => {
 
 // Login de Administrador
 app.post('/api/auth/login/admin', async (req, res) => {
-  const db = readDB();
+  const db = await readDB();
   const { email, password } = req.body;
 
   const user = db.users.find(u => u.email === email && u.role === 'admin');
@@ -1188,7 +1140,7 @@ app.post('/api/auth/login/admin', async (req, res) => {
 
 // Manter endpoint genérico para compatibilidade (deprecated)
 app.post('/api/auth/login', async (req, res) => {
-  const db = readDB();
+  const db = await readDB();
   const { email, password } = req.body;
 
   const user = db.users.find(u => u.email === email);
@@ -1236,7 +1188,7 @@ app.post('/api/upload/image', upload.single('image'), (req, res) => {
 });
 
 app.post('/api/auth/register', async (req, res) => {
-  const db = readDB();
+  const db = await readDB();
   const { email, password, name, phone } = req.body;
 
   // Validar senha forte
@@ -1288,7 +1240,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // Validar senha (endpoint para feedback em tempo real no frontend)
-app.post('/api/auth/validate-password', (req, res) => {
+app.post('/api/auth/validate-password', async (req, res) => {
   const { password } = req.body;
 
   const validation = validatePassword(password);
@@ -1303,17 +1255,16 @@ app.post('/api/auth/validate-password', (req, res) => {
 });
 
 // Rotas de Produtos
-app.get('/api/products', (req, res) => {
-  const db = readDB();
+app.get('/api/products', async (req, res) => {
+  const db = await readDB();
   const { userId, type } = req.query;
 
   console.log('🔍 GET /api/products - type:', type, 'userId:', userId);
   let products = db.products;
   console.log('📦 Total de produtos no banco:', products.length);
 
-  // ✅ CORREÇÃO: Filtrar produtos do usuário com conversão de tipo
   if (type === 'my-products' && userId) {
-    products = products.filter(p => String(p.producerId) === String(userId));
+    products = products.filter(p => p.producerId === userId);
   } else if (type === 'affiliate-store') {
     console.log('🏪 Filtrando produtos para vitrine...');
     // Filtrar apenas produtos APROVADOS e visíveis na vitrine
@@ -1366,8 +1317,8 @@ app.get('/api/products', (req, res) => {
   res.json(products);
 });
 
-app.get('/api/products/:id', (req, res) => {
-  const db = readDB();
+app.get('/api/products/:id', async (req, res) => {
+  const db = await readDB();
   const product = db.products.find(p => p.id === req.params.id);
   if (product) {
     res.json(product);
@@ -1376,8 +1327,8 @@ app.get('/api/products/:id', (req, res) => {
   }
 });
 
-app.post('/api/products', (req, res) => {
-  const db = readDB();
+app.post('/api/products', async (req, res) => {
+  const db = await readDB();
   const productData = req.body;
 
   // Configuração padrão de checkout se não fornecida
@@ -1422,8 +1373,8 @@ app.post('/api/products', (req, res) => {
   res.status(201).json(newProduct);
 });
 
-app.patch('/api/products/:id', (req, res) => {
-  const db = readDB();
+app.patch('/api/products/:id', async (req, res) => {
+  const db = await readDB();
   const productIndex = db.products.findIndex(p => p.id === req.params.id);
 
   if (productIndex === -1) {
@@ -1480,8 +1431,8 @@ app.patch('/api/products/:id', (req, res) => {
 });
 
 // Solicitar exclusão de produto
-app.post('/api/products/:id/request-deletion', (req, res) => {
-  const db = readDB();
+app.post('/api/products/:id/request-deletion', async (req, res) => {
+  const db = await readDB();
   const { reason, userId, userName } = req.body;
   const productIndex = db.products?.findIndex(p => p.id == req.params.id);
 
@@ -1528,8 +1479,8 @@ app.post('/api/products/:id/request-deletion', (req, res) => {
 // ========== ROTAS DE APROVAÇÃO DE PRODUTOS (ADMIN) ==========
 
 // Listar todos os produtos (com filtro por approvalStatus)
-app.get('/api/admin/products', (req, res) => {
-  const db = readDB();
+app.get('/api/admin/products', async (req, res) => {
+  const db = await readDB();
   const { approvalStatus } = req.query;
 
   let products = db.products;
@@ -1542,8 +1493,8 @@ app.get('/api/admin/products', (req, res) => {
 });
 
 // Aprovar produto
-app.patch('/api/admin/products/:id/approve', (req, res) => {
-  const db = readDB();
+app.patch('/api/admin/products/:id/approve', async (req, res) => {
+  const db = await readDB();
   const productIndex = db.products.findIndex(p => p.id === req.params.id);
 
   if (productIndex === -1) {
@@ -1588,8 +1539,8 @@ app.patch('/api/admin/products/:id/approve', (req, res) => {
 });
 
 // Rejeitar produto
-app.patch('/api/admin/products/:id/reject', (req, res) => {
-  const db = readDB();
+app.patch('/api/admin/products/:id/reject', async (req, res) => {
+  const db = await readDB();
   const { reason } = req.body;
   const productIndex = db.products.findIndex(p => p.id === req.params.id);
 
@@ -1638,8 +1589,8 @@ app.patch('/api/admin/products/:id/reject', (req, res) => {
 
 
 // Rotas de Afiliações
-app.post('/api/affiliations', (req, res) => {
-  const db = readDB();
+app.post('/api/affiliations', async (req, res) => {
+  const db = await readDB();
   const { productId, affiliateId } = req.body;
 
   const product = db.products.find(p => p.id === productId);
@@ -1678,8 +1629,8 @@ app.post('/api/affiliations', (req, res) => {
   res.status(201).json(affiliation);
 });
 
-app.get('/api/affiliations', (req, res) => {
-  const db = readDB();
+app.get('/api/affiliations', async (req, res) => {
+  const db = await readDB();
   const { affiliateId } = req.query;
 
   let affiliations = db.affiliations;
@@ -1692,8 +1643,8 @@ app.get('/api/affiliations', (req, res) => {
 });
 
 // Rotas de Pedidos
-app.post('/api/orders', (req, res) => {
-  const db = readDB();
+app.post('/api/orders', async (req, res) => {
+  const db = await readDB();
   const { productId, customer, quantity = 1, paymentMethod = 'pix', pixExpirationMinutes = 2880, boletoDueDays = 5, affiliateId = null, selectedPlanName = null } = req.body;
 
   const product = db.products.find(p => p.id === productId);
@@ -2006,17 +1957,14 @@ app.post('/api/orders', (req, res) => {
 });
 
 app.get('/api/orders', async (req, res) => {
-  const db = readDB();
+  const db = await readDB();
   const { userId, syncReleaseDate } = req.query;
 
   let orders = db.orders;
 
-  // ✅ CORREÇÃO: SEMPRE filtrar por userId para garantir isolamento de dados
+  // Filtrar por userId se fornecido
   if (userId) {
-    orders = orders.filter(o =>
-      String(o.producerId) === String(userId) ||
-      String(o.affiliateId) === String(userId)
-    );
+    orders = orders.filter(o => o.producerId === userId || o.affiliateId === userId);
   }
 
   // Se solicitado, sincronizar datas de liberação do Pagar.me
@@ -2072,8 +2020,8 @@ app.get('/api/orders', async (req, res) => {
   res.json(orders);
 });
 
-app.get('/api/orders/:id', (req, res) => {
-  const db = readDB();
+app.get('/api/orders/:id', async (req, res) => {
+  const db = await readDB();
   const order = db.orders.find(o => o.id === req.params.id);
   if (order) {
     res.json(order);
@@ -2090,7 +2038,7 @@ const CACHE_DURATION = 30 * 60 * 1000; // 30 minutos em milissegundos
 async function fetchCorreiosTracking(trackingCode, userId) {
   console.log(`🔍 Tentando buscar rastreio: ${trackingCode} (userId: ${userId})`);
 
-  const db = readDB();
+  const db = await readDB();
 
   // Buscar contratos ativos do usuário
   const userContracts = db.correiosContracts
@@ -2228,7 +2176,7 @@ function decryptToken(encryptedText) {
 // ============================================
 
 // 1. Listar contratos do usuário
-app.get('/api/correios-contracts', (req, res) => {
+app.get('/api/correios-contracts', async (req, res) => {
   try {
     const { userId } = req.query;
 
@@ -2236,7 +2184,7 @@ app.get('/api/correios-contracts', (req, res) => {
       return res.status(400).json({ error: 'userId é obrigatório' });
     }
 
-    const db = readDB();
+    const db = await readDB();
     const contracts = db.correiosContracts.filter(c => c.userId === userId);
 
     // Remover access_token da resposta por segurança
@@ -2250,7 +2198,7 @@ app.get('/api/correios-contracts', (req, res) => {
 });
 
 // 2. Criar novo contrato
-app.post('/api/correios-contracts', (req, res) => {
+app.post('/api/correios-contracts', async (req, res) => {
   try {
     const { userId, name, username, accessToken, contractNumber, isActive } = req.body;
 
@@ -2261,7 +2209,7 @@ app.post('/api/correios-contracts', (req, res) => {
       });
     }
 
-    const db = readDB();
+    const db = await readDB();
 
     // Criptografar o token de acesso
     const encryptedToken = encryptToken(accessToken);
@@ -2300,12 +2248,12 @@ app.post('/api/correios-contracts', (req, res) => {
 });
 
 // 3. Editar contrato
-app.put('/api/correios-contracts/:id', (req, res) => {
+app.put('/api/correios-contracts/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, username, accessToken, contractNumber, isActive } = req.body;
 
-    const db = readDB();
+    const db = await readDB();
     const contractIndex = db.correiosContracts.findIndex(c => c.id === id);
 
     if (contractIndex === -1) {
@@ -2342,11 +2290,11 @@ app.put('/api/correios-contracts/:id', (req, res) => {
 });
 
 // 4. Deletar contrato
-app.delete('/api/correios-contracts/:id', (req, res) => {
+app.delete('/api/correios-contracts/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const db = readDB();
+    const db = await readDB();
     const initialLength = db.correiosContracts.length;
     db.correiosContracts = db.correiosContracts.filter(c => c.id !== id);
 
@@ -2376,7 +2324,7 @@ app.post('/api/correios-contracts/:id/test', async (req, res) => {
       return res.status(400).json({ error: 'Código de rastreio é obrigatório' });
     }
 
-    const db = readDB();
+    const db = await readDB();
     const contract = db.correiosContracts.find(c => c.id === id);
 
     if (!contract) {
@@ -2458,7 +2406,7 @@ app.post('/api/correios-contracts/:id/test', async (req, res) => {
 // Endpoint para buscar rastreio dos Correios
 app.get('/api/orders/:orderId/correios-tracking', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const order = db.orders.find(o => o.id === req.params.orderId);
 
     if (!order) {
@@ -2549,8 +2497,8 @@ app.get('/api/orders/:orderId/correios-tracking', async (req, res) => {
   }
 });
 
-app.patch('/api/orders/:id', (req, res) => {
-  const db = readDB();
+app.patch('/api/orders/:id', async (req, res) => {
+  const db = await readDB();
   const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
 
   if (orderIndex === -1) {
@@ -2646,8 +2594,8 @@ app.patch('/api/orders/:id', (req, res) => {
 // ============ ROTAS DE WEBHOOKS ============
 
 // Listar webhooks do usuário
-app.get('/api/webhooks', (req, res) => {
-  const db = readDB();
+app.get('/api/webhooks', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.query;
 
   if (!userId) {
@@ -2659,8 +2607,8 @@ app.get('/api/webhooks', (req, res) => {
 });
 
 // Criar novo webhook
-app.post('/api/webhooks', (req, res) => {
-  const db = readDB();
+app.post('/api/webhooks', async (req, res) => {
+  const db = await readDB();
   const { userId, name, url, product, events } = req.body;
 
   if (!userId || !name || !url) {
@@ -2702,8 +2650,8 @@ app.post('/api/webhooks', (req, res) => {
 });
 
 // Atualizar webhook
-app.put('/api/webhooks/:id', (req, res) => {
-  const db = readDB();
+app.put('/api/webhooks/:id', async (req, res) => {
+  const db = await readDB();
   const { id } = req.params;
   const { name, url, product, status, events } = req.body;
 
@@ -2732,8 +2680,8 @@ app.put('/api/webhooks/:id', (req, res) => {
 });
 
 // Deletar webhook
-app.delete('/api/webhooks/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/webhooks/:id', async (req, res) => {
+  const db = await readDB();
   const { id } = req.params;
 
   if (!db.webhooks) {
@@ -2755,8 +2703,8 @@ app.delete('/api/webhooks/:id', (req, res) => {
 });
 
 // Testar webhook (enviar manualmente)
-app.post('/api/webhooks/:id/test', (req, res) => {
-  const db = readDB();
+app.post('/api/webhooks/:id/test', async (req, res) => {
+  const db = await readDB();
   const { id } = req.params;
 
   if (!db.webhooks) {
@@ -2812,8 +2760,8 @@ app.post('/api/webhooks/:id/test', (req, res) => {
 });
 
 // Obter logs de webhooks
-app.get('/api/webhooks/:id/logs', (req, res) => {
-  const db = readDB();
+app.get('/api/webhooks/:id/logs', async (req, res) => {
+  const db = await readDB();
   const { id } = req.params;
   const { limit = 50 } = req.query;
 
@@ -2830,8 +2778,8 @@ app.get('/api/webhooks/:id/logs', (req, res) => {
 // ============ ROTAS DE INTEGRAÇÃO NOTAZZ ============
 
 // Buscar configuração Notazz do usuário
-app.get('/api/integrations/notazz', (req, res) => {
-  const db = readDB();
+app.get('/api/integrations/notazz', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.query;
 
   if (!userId) {
@@ -2856,8 +2804,8 @@ app.get('/api/integrations/notazz', (req, res) => {
 });
 
 // ========== ENDPOINT DE DIAGNÓSTICO NOTAZZ ==========
-app.get('/api/integrations/notazz/logs', (req, res) => {
-  const db = readDB();
+app.get('/api/integrations/notazz/logs', async (req, res) => {
+  const db = await readDB();
   const { userId, orderId, limit = 20 } = req.query;
 
   let logs = db.notazzLogs || [];
@@ -2892,8 +2840,8 @@ app.get('/api/integrations/notazz/logs', (req, res) => {
 });
 
 // ========== DIAGNÓSTICO: Últimos pedidos criados ==========
-app.get('/api/debug/recent-orders', (req, res) => {
-  const db = readDB();
+app.get('/api/debug/recent-orders', async (req, res) => {
+  const db = await readDB();
   const limit = parseInt(req.query.limit) || 5;
 
   const recentOrders = db.orders
@@ -2918,8 +2866,8 @@ app.get('/api/debug/recent-orders', (req, res) => {
 });
 
 // ========== SUPER DIAGNÓSTICO: Comparar Banco vs Notazz ==========
-app.get('/api/debug/super-diagnostic', (req, res) => {
-  const db = readDB();
+app.get('/api/debug/super-diagnostic', async (req, res) => {
+  const db = await readDB();
   const limit = parseInt(req.query.limit) || 3;
 
   // Buscar últimos pedidos
@@ -2997,7 +2945,7 @@ app.get('/api/integrations/notazz/check-note/:orderId', async (req, res) => {
   const { orderId } = req.params;
   const { userId } = req.query;
 
-  const db = readDB();
+  const db = await readDB();
 
   // Buscar log do envio
   const log = db.notazzLogs?.find(log => log.orderId === orderId);
@@ -3034,7 +2982,7 @@ app.get('/api/integrations/notazz/check-note/:orderId', async (req, res) => {
 
 // ========== TESTE DE PAYLOAD MÍNIMO ==========
 app.post('/api/integrations/notazz/test-minimal', async (req, res) => {
-  const db = readDB();
+  const db = await readDB();
   const { userId } = req.body;
 
   if (!userId) {
@@ -3144,11 +3092,11 @@ app.post('/api/integrations/notazz/test-minimal', async (req, res) => {
 });
 
 // Salvar configuração Notazz
-app.post('/api/integrations/notazz', (req, res) => {
+app.post('/api/integrations/notazz', async (req, res) => {
   console.log('\n📝 Recebendo requisição para salvar configuração Notazz...');
   console.log('Body recebido:', req.body);
 
-  const db = readDB();
+  const db = await readDB();
   const { userId, webhookId, apiKey, enabled, autoSend } = req.body;
 
   console.log('Dados extraídos:', { userId, webhookId, apiKey: apiKey ? '***' : 'não fornecida', enabled, autoSend });
@@ -3200,8 +3148,8 @@ app.post('/api/integrations/notazz', (req, res) => {
 // ========== ENDPOINTS PAGAR.ME ==========
 
 // Buscar configuração Pagar.me do usuário
-app.get('/api/integrations/pagarme', (req, res) => {
-  const db = readDB();
+app.get('/api/integrations/pagarme', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.query;
 
   if (!userId) {
@@ -3239,74 +3187,76 @@ app.get('/api/integrations/pagarme', (req, res) => {
 
 // Salvar configuração Pagar.me
 app.post('/api/integrations/pagarme', async (req, res) => {
-  try {
-    console.log('\n📝 Recebendo requisição para salvar configuração Pagar.me...');
-    console.log('Body recebido:', { ...req.body, publicKey: req.body.publicKey ? '***' : '', privateKey: req.body.privateKey ? '***' : '' });
+  console.log('\n📝 Recebendo requisição para salvar configuração Pagar.me...');
+  console.log('Body recebido:', { ...req.body, publicKey: req.body.publicKey ? '***' : '', privateKey: req.body.privateKey ? '***' : '' });
 
-    const {
-      userId,
-      publicKey,
-      privateKey,
-      webhookUrl,
-      splitReceiverId,
-      splitRate,
-      splitAnticipationRate,
-      credentialsLocked,
-      splitLocked,
-      enabled
-    } = req.body;
+  const db = await readDB();
+  const {
+    userId,
+    publicKey,
+    privateKey,
+    webhookUrl,
+    splitReceiverId,
+    splitRate,
+    splitAnticipationRate,
+    credentialsLocked,
+    splitLocked,
+    enabled
+  } = req.body;
 
-    if (!userId) {
-      console.log('❌ Erro: userId ausente');
-      return res.status(400).json({ error: 'userId é obrigatório' });
-    }
-
-    // Upsert (create ou update) no PostgreSQL via Prisma
-    const config = await prisma.pagarMeConfig.upsert({
-      where: { userId },
-      update: {
-        publicKey: publicKey || '',
-        privateKey: privateKey || '',
-        webhookUrl: webhookUrl || `https://app.pag2pay.com/api/v1/gateway/webhook/pagar_me/${userId}`,
-        splitReceiverId: splitReceiverId || '',
-        splitRate: splitRate || '3.67',
-        splitAnticipationRate: splitAnticipationRate || '',
-        credentialsLocked: credentialsLocked || false,
-        splitLocked: splitLocked || false,
-        enabled: enabled || false
-      },
-      create: {
-        userId,
-        publicKey: publicKey || '',
-        privateKey: privateKey || '',
-        webhookUrl: webhookUrl || `https://app.pag2pay.com/api/v1/gateway/webhook/pagar_me/${userId}`,
-        splitReceiverId: splitReceiverId || '',
-        splitRate: splitRate || '3.67',
-        splitAnticipationRate: splitAnticipationRate || '',
-        credentialsLocked: credentialsLocked || false,
-        splitLocked: splitLocked || false,
-        enabled: enabled || false
-      }
-    });
-
-    console.log('✅ Configuração Pagar.me salva no PostgreSQL para usuário:', userId);
-
-    res.json({
-      success: true,
-      config: {
-        ...config,
-        privateKey: config.privateKey ? '***' : '' // Não retornar chave privada completa
-      }
-    });
-  } catch (error) {
-    console.error('❌ Erro ao salvar configuração Pagar.me:', error);
-    res.status(500).json({ error: 'Erro ao salvar configuração' });
+  if (!userId) {
+    console.log('❌ Erro: userId ausente');
+    return res.status(400).json({ error: 'userId é obrigatório' });
   }
+
+  if (!db.pagarmeConfigs) {
+    console.log('⚠️ Array pagarmeConfigs não existe, criando...');
+    db.pagarmeConfigs = [];
+  }
+
+  const existingIndex = db.pagarmeConfigs.findIndex(c => c.userId === userId);
+  console.log(`Configuração existente? ${existingIndex !== -1 ? `Sim (índice ${existingIndex})` : 'Não'}`);
+
+  const config = {
+    userId,
+    publicKey: publicKey || '',
+    privateKey: privateKey || '',
+    webhookUrl: webhookUrl || `https://app.pag2pay.com/api/v1/gateway/webhook/pagar_me/${userId}`,
+    splitReceiverId: splitReceiverId || '',
+    splitRate: splitRate || '3.67',
+    splitAnticipationRate: splitAnticipationRate || '',
+    credentialsLocked: credentialsLocked || false,
+    splitLocked: splitLocked || false,
+    enabled: enabled || false,
+    updatedAt: new Date().toISOString()
+  };
+
+  console.log('Configuração a ser salva:', {
+    ...config,
+    publicKey: config.publicKey ? `${config.publicKey.substring(0, 10)}...` : '',
+    privateKey: config.privateKey ? '***OCULTA***' : ''
+  });
+
+  if (existingIndex !== -1) {
+    db.pagarmeConfigs[existingIndex] = config;
+  } else {
+    db.pagarmeConfigs.push(config);
+  }
+
+  writeDB(db);
+
+  console.log(`✅ Configuração Pagar.me ${existingIndex !== -1 ? 'atualizada' : 'criada'} para usuário ${userId}`);
+  console.log(`📊 Total de configurações Pagar.me no banco: ${db.pagarmeConfigs.length}`);
+
+  res.json({ success: true, config: {
+    ...config,
+    privateKey: config.privateKey ? '***' : '' // Não retornar chave privada completa
+  }});
 });
 
 // Deletar configuração Pagar.me
-app.delete('/api/integrations/pagarme', (req, res) => {
-  const db = readDB();
+app.delete('/api/integrations/pagarme', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.query;
 
   if (!userId) {
@@ -3334,7 +3284,7 @@ app.delete('/api/integrations/pagarme', (req, res) => {
 app.post('/api/integrations/pagarme/create-recipient', async (req, res) => {
   console.log('\n📝 Criando recebedor na Pagar.me...');
 
-  const db = readDB();
+  const db = await readDB();
   const { userId, userData } = req.body;
 
   if (!userId || !userData) {
@@ -3413,7 +3363,7 @@ app.post('/api/integrations/pagarme/create-recipient', async (req, res) => {
       db.users[userIndex].splitAccountId = result.id;
       db.users[userIndex].splitStatus = 'active';
       db.users[userIndex].splitCreatedAt = new Date().toISOString();
-      await writeDB(db);
+      writeDB(db);
     }
 
     res.json({
@@ -3564,7 +3514,7 @@ app.post('/api/integrations/pagarme/create-order-with-split', async (req, res) =
         boletoUrl: result.charges?.[0]?.last_transaction?.url,
         barcode: result.charges?.[0]?.last_transaction?.line
       };
-      await writeDB(db);
+      writeDB(db);
     }
 
     res.json({
@@ -3673,7 +3623,7 @@ app.get('/api/integrations/pagarme/payables', async (req, res) => {
 app.post('/api/orders/:id/sync-release-date', async (req, res) => {
   console.log('\n🔄 Sincronizando data de liberação do Pagar.me...');
 
-  const db = readDB();
+  const db = await readDB();
   const { id } = req.params;
 
   try {
@@ -3738,7 +3688,7 @@ app.post('/api/orders/:id/sync-release-date', async (req, res) => {
 
 // Enviar pedido para o Notazz (gerar nota)
 app.post('/api/integrations/notazz/send-order', async (req, res) => {
-  const db = readDB();
+  const db = await readDB();
   const { orderId, userId } = req.body;
 
   if (!orderId || !userId) {
@@ -3847,8 +3797,8 @@ app.post('/api/integrations/notazz/send-order', async (req, res) => {
 
 // Webhook para receber código de rastreio do Notazz
 // 📦 WEBHOOK NOTAZZ - Receber rastreio disponível
-app.post('/api/integrations/notazz/tracking-webhook', (req, res) => {
-  const db = readDB();
+app.post('/api/integrations/notazz/tracking-webhook', async (req, res) => {
+  const db = await readDB();
   const payload = req.body;
 
   console.log(`\n📥 ========== WEBHOOK NOTAZZ RECEBIDO ==========`);
@@ -4013,8 +3963,8 @@ app.post('/api/integrations/notazz/tracking-webhook', (req, res) => {
 });
 
 // 🔍 DIAGNÓSTICO NOTAZZ - Verificar configuração e último pedido
-app.get('/api/integrations/notazz/diagnostico', (req, res) => {
-  const db = readDB();
+app.get('/api/integrations/notazz/diagnostico', async (req, res) => {
+  const db = await readDB();
   let { userId } = req.query;
 
   // Se não passar userId, pegar do primeiro usuário (para facilitar teste)
@@ -4112,17 +4062,15 @@ app.get('/api/integrations/notazz/diagnostico', (req, res) => {
 });
 
 // Rotas de Comissões
-app.get('/api/commissions', (req, res) => {
-  const db = readDB();
+app.get('/api/commissions', async (req, res) => {
+  const db = await readDB();
   const { userId, status } = req.query;
 
   let commissions = db.commissions;
 
-  // ✅ CORREÇÃO: Filtrar comissões por usuário com conversão de tipo
   if (userId) {
     commissions = commissions.filter(c =>
-      String(c.producerId) === String(userId) ||
-      String(c.affiliateId) === String(userId)
+      c.producerId === userId || c.affiliateId === userId
     );
   }
 
@@ -4134,8 +4082,8 @@ app.get('/api/commissions', (req, res) => {
 });
 
 // Rota de Validação de Cupom
-app.post('/api/coupons/validate', (req, res) => {
-  const db = readDB();
+app.post('/api/coupons/validate', async (req, res) => {
+  const db = await readDB();
   const { code, productId } = req.body;
 
   if (!code || !productId) {
@@ -4167,8 +4115,8 @@ app.post('/api/coupons/validate', (req, res) => {
 });
 
 // Rotas de Usuários (Admin)
-app.get('/api/users', (req, res) => {
-  const db = readDB();
+app.get('/api/users', async (req, res) => {
+  const db = await readDB();
   const users = db.users.map(user => {
     const { password, ...userWithoutPassword } = user;
     return userWithoutPassword;
@@ -4177,7 +4125,7 @@ app.get('/api/users', (req, res) => {
 });
 
 // Endpoint para validar fornecedor (supplier)
-app.get('/api/suppliers/validate', (req, res) => {
+app.get('/api/suppliers/validate', async (req, res) => {
   const { email } = req.query;
 
   if (!email) {
@@ -4187,7 +4135,7 @@ app.get('/api/suppliers/validate', (req, res) => {
     });
   }
 
-  const db = readDB();
+  const db = await readDB();
 
   // Buscar usuário por e-mail
   const supplier = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
@@ -4236,8 +4184,8 @@ app.get('/api/suppliers/validate', (req, res) => {
   });
 });
 
-app.patch('/api/users/:id', (req, res) => {
-  const db = readDB();
+app.patch('/api/users/:id', async (req, res) => {
+  const db = await readDB();
   const userIndex = db.users.findIndex(u => u.id === req.params.id);
 
   if (userIndex === -1) {
@@ -4250,14 +4198,14 @@ app.patch('/api/users/:id', (req, res) => {
     updatedAt: new Date().toISOString()
   };
 
-  (db);
+  writeDB(db);
 
   const { password, ...userWithoutPassword } = db.users[userIndex];
   res.json(userWithoutPassword);
 });
 
-app.delete('/api/users/:id', (req, res) => {
-  const db = readDB();
+app.delete('/api/users/:id', async (req, res) => {
+  const db = await readDB();
   const userIndex = db.users.findIndex(u => u.id === req.params.id);
 
   if (userIndex === -1) {
@@ -4265,7 +4213,7 @@ app.delete('/api/users/:id', (req, res) => {
   }
 
   db.users.splice(userIndex, 1);
-  (db);
+  writeDB(db);
 
   res.json({ success: true, message: 'Usuário excluído com sucesso' });
 });
@@ -4278,7 +4226,7 @@ app.delete('/api/users/:id', (req, res) => {
 app.post('/api/users/:userId/create-recipient', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const userIndex = db.users.findIndex(u => u.id === userId);
 
@@ -4382,15 +4330,15 @@ app.post('/api/users/:userId/create-recipient', async (req, res) => {
 
     // Marcar status como pending
     db.users[userIndex].splitStatus = 'pending';
-    (db);
+    writeDB(db);
 
     // Criar recipient na Pagar.me
     console.log(`👤 Criando recipient para usuário ${userId}...`);
 
-    const apiKey = getPagarmeApiKey();
+    const apiKey = await getPagarmeApiKey();
     if (!apiKey) {
       db.users[userIndex].splitStatus = 'not_created';
-      (db);
+      writeDB(db);
 
       return res.status(500).json({
         success: false,
@@ -4427,7 +4375,7 @@ app.post('/api/users/:userId/create-recipient', async (req, res) => {
       db.users[userIndex].bankAccount = bankAccount;
       db.users[userIndex].updatedAt = new Date().toISOString();
 
-      (db);
+      writeDB(db);
 
       console.log(`💾 Recipient salvo no usuário em múltiplos formatos para compatibilidade`);
       console.log(`   user.pagarme.recipientId: ${recipient.recipientId}`);
@@ -4447,7 +4395,7 @@ app.post('/api/users/:userId/create-recipient', async (req, res) => {
 
       // Voltar status para not_created
       db.users[userIndex].splitStatus = 'not_created';
-      (db);
+      writeDB(db);
 
       // Extrair mensagem de erro mais específica
       let errorMessage = 'Erro ao criar recebedor na Pagar.me';
@@ -4492,7 +4440,7 @@ app.post('/api/users/:userId/create-recipient', async (req, res) => {
 app.post('/api/users/:userId/sync-recipient', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const user = db.users.find(u => u.id === userId);
 
@@ -4510,7 +4458,7 @@ app.post('/api/users/:userId/sync-recipient', async (req, res) => {
       });
     }
 
-    const apiKey = getPagarmeApiKey();
+    const apiKey = await getPagarmeApiKey();
     if (!apiKey) {
       return res.status(500).json({
         success: false,
@@ -4555,7 +4503,7 @@ app.post('/api/users/:userId/sync-recipient', async (req, res) => {
 app.post('/api/users/:userId/disconnect-recipient', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const userIndex = db.users.findIndex(u => u.id === userId);
 
@@ -4582,7 +4530,7 @@ app.post('/api/users/:userId/disconnect-recipient', async (req, res) => {
     delete db.users[userIndex].splitCreatedAt;
     db.users[userIndex].splitStatus = 'not_created';
     db.users[userIndex].updatedAt = new Date().toISOString();
-    (db);
+    writeDB(db);
 
     res.json({
       success: true,
@@ -4606,7 +4554,7 @@ app.post('/api/users/:userId/disconnect-recipient', async (req, res) => {
 app.get('/api/users/:userId/balance', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     // Buscar usuário
     const user = db.users?.find(u => u.id === userId);
@@ -4702,7 +4650,7 @@ app.post('/api/users/:userId/withdraw', async (req, res) => {
   try {
     const { userId } = req.params;
     const { amount } = req.body; // Valor solicitado em centavos
-    const db = readDB();
+    const db = await readDB();
 
     const user = db.users?.find(u => u.id === userId);
     if (!user) {
@@ -4814,7 +4762,7 @@ app.post('/api/users/:userId/withdraw', async (req, res) => {
     };
 
     db.withdrawals.push(withdrawal);
-    (db);
+    writeDB(db);
 
     console.log(`✅ Saque criado: ${withdrawal.id} - ${transfers.length} transferências`);
 
@@ -4848,10 +4796,10 @@ app.post('/api/users/:userId/withdraw', async (req, res) => {
 });
 
 // ✅ LISTAR SAQUES DO USUÁRIO
-app.get('/api/users/:userId/withdrawals', (req, res) => {
+app.get('/api/users/:userId/withdrawals', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const user = db.users?.find(u => u.id === userId);
     if (!user) {
@@ -4880,10 +4828,10 @@ app.get('/api/users/:userId/withdrawals', (req, res) => {
 // ============ ROTAS DE AUTO-LOGIN ============
 
 // Gerar token de login temporário
-app.post('/api/users/:userId/generate-login-token', (req, res) => {
+app.post('/api/users/:userId/generate-login-token', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const user = db.users?.find(u => u.id === userId);
     if (!user) {
@@ -4923,7 +4871,7 @@ app.post('/api/users/:userId/generate-login-token', (req, res) => {
 });
 
 // Endpoint de auto-login
-app.post('/api/auto-login', (req, res) => {
+app.post('/api/auto-login', async (req, res) => {
   try {
     const { token } = req.body;
 
@@ -4940,7 +4888,7 @@ app.post('/api/auto-login', (req, res) => {
       return res.status(401).json({ success: false, error: 'Token inválido' });
     }
 
-    const db = readDB();
+    const db = await readDB();
     const user = db.users?.find(u => u.id === decoded.userId);
 
     if (!user) {
@@ -4991,10 +4939,10 @@ app.post('/api/auto-login', (req, res) => {
 // ============ ROTAS DE TAXAS PERSONALIZADAS POR USUÁRIO ============
 
 // Obter taxas do usuário
-app.get('/api/users/:userId/fees', (req, res) => {
+app.get('/api/users/:userId/fees', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const user = db.users?.find(u => u.id === userId);
     if (!user) {
@@ -5018,11 +4966,11 @@ app.get('/api/users/:userId/fees', (req, res) => {
 });
 
 // Salvar taxas personalizadas do usuário
-app.post('/api/users/:userId/fees', (req, res) => {
+app.post('/api/users/:userId/fees', async (req, res) => {
   try {
     const { userId } = req.params;
     const { feeType, fees } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     const userIndex = db.users?.findIndex(u => u.id === userId);
     if (userIndex === -1) {
@@ -5072,10 +5020,10 @@ app.post('/api/users/:userId/fees', (req, res) => {
 // ============ ROTAS DE CONFIGURAÇÃO DE SAQUES ============
 
 // Obter configuração de saques do usuário
-app.get('/api/users/:userId/withdrawal-config', (req, res) => {
+app.get('/api/users/:userId/withdrawal-config', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const user = db.users?.find(u => u.id === userId);
     if (!user) {
@@ -5099,11 +5047,11 @@ app.get('/api/users/:userId/withdrawal-config', (req, res) => {
 });
 
 // Salvar configuração de saques do usuário
-app.post('/api/users/:userId/withdrawal-config', (req, res) => {
+app.post('/api/users/:userId/withdrawal-config', async (req, res) => {
   try {
     const { userId } = req.params;
     const { maxDailyWithdrawal, maxPerWithdrawal, minPerWithdrawal, autoApprovalEnabled } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     const userIndex = db.users?.findIndex(u => u.id === userId);
     if (userIndex === -1) {
@@ -5151,7 +5099,7 @@ app.post('/api/users/:userId/withdrawal/request', async (req, res) => {
   try {
     const { userId } = req.params;
     const { amount } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     // Validar valor
     if (!amount || amount <= 0) {
@@ -5256,10 +5204,10 @@ app.post('/api/users/:userId/withdrawal/request', async (req, res) => {
 // ============ ROTAS DE CONFIGURAÇÃO DE ANTECIPAÇÃO ============
 
 // Obter configuração de antecipação do usuário
-app.get('/api/users/:userId/anticipation-config', (req, res) => {
+app.get('/api/users/:userId/anticipation-config', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const user = db.users?.find(u => u.id === userId);
     if (!user) {
@@ -5282,11 +5230,11 @@ app.get('/api/users/:userId/anticipation-config', (req, res) => {
 });
 
 // Salvar configuração de antecipação do usuário
-app.post('/api/users/:userId/anticipation-config', (req, res) => {
+app.post('/api/users/:userId/anticipation-config', async (req, res) => {
   try {
     const { userId } = req.params;
     const { anticipationDays, anticipationRate, calculateByDays, customAnticipationEnabled } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     const userIndex = db.users?.findIndex(u => u.id === userId);
     if (userIndex === -1) {
@@ -5330,8 +5278,8 @@ app.post('/api/users/:userId/anticipation-config', (req, res) => {
 // ============ ROTAS DE VERIFICAÇÃO DE DOCUMENTOS (KYC) ============
 
 // Obter dados de verificação do usuário
-app.get('/api/users/:userId/verification', (req, res) => {
-  const db = readDB();
+app.get('/api/users/:userId/verification', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
 
   if (!db.userVerifications) {
@@ -5384,8 +5332,8 @@ app.get('/api/users/:userId/verification', (req, res) => {
 });
 
 // Enviar/Atualizar documentos de verificação
-app.post('/api/users/:userId/verification', (req, res) => {
-  const db = readDB();
+app.post('/api/users/:userId/verification', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
   const { formData, documents, accountType } = req.body;
 
@@ -5444,8 +5392,8 @@ app.post('/api/users/:userId/verification', (req, res) => {
 });
 
 // Salvar rascunho dos documentos (auto-save)
-app.post('/api/users/:userId/verification/draft', (req, res) => {
-  const db = readDB();
+app.post('/api/users/:userId/verification/draft', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
   const { formData, documents, accountType } = req.body;
 
@@ -5509,8 +5457,8 @@ app.post('/api/users/:userId/verification/draft', (req, res) => {
 });
 
 // Atualizar status de uma seção específica (usado pelo admin)
-app.patch('/api/users/:userId/verification/:section', (req, res) => {
-  const db = readDB();
+app.patch('/api/users/:userId/verification/:section', async (req, res) => {
+  const db = await readDB();
   const { userId, section } = req.params;
   const { status, message } = req.body;
 
@@ -5631,8 +5579,8 @@ app.patch('/api/users/:userId/verification/:section', (req, res) => {
 // ============ ROTAS DE GERENCIAMENTO DE USUÁRIOS (ADMIN) ============
 
 // Listar TODOS os usuários cadastrados com status
-app.get('/api/platform/users', (req, res) => {
-  const db = readDB();
+app.get('/api/platform/users', async (req, res) => {
+  const db = await readDB();
 
   if (!db.users) {
     return res.json([]);
@@ -5688,8 +5636,8 @@ app.get('/api/platform/users', (req, res) => {
 });
 
 // Admin edita dados KYC do usuário
-app.patch('/api/platform/users/:userId/edit-kyc', (req, res) => {
-  const db = readDB();
+app.patch('/api/platform/users/:userId/edit-kyc', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
   const { kycData } = req.body;
 
@@ -5725,8 +5673,8 @@ app.patch('/api/platform/users/:userId/edit-kyc', (req, res) => {
 });
 
 // Admin edita dados bancários do usuário
-app.patch('/api/platform/users/:userId/edit-bank', (req, res) => {
-  const db = readDB();
+app.patch('/api/platform/users/:userId/edit-bank', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
   const { bankData } = req.body;
 
@@ -5762,8 +5710,8 @@ app.patch('/api/platform/users/:userId/edit-bank', (req, res) => {
 });
 
 // Usuário solicita permissão para editar dados aprovados
-app.post('/api/users/:userId/request-edit', (req, res) => {
-  const db = readDB();
+app.post('/api/users/:userId/request-edit', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
   const { sections } = req.body; // Array de seções: ['kyc', 'dadosBancarios', 'documentos']
 
@@ -5818,8 +5766,8 @@ app.post('/api/users/:userId/request-edit', (req, res) => {
 // ============ ROTAS DE NOTIFICAÇÕES ============
 
 // Listar notificações do usuário
-app.get('/api/users/:userId/notifications', (req, res) => {
-  const db = readDB();
+app.get('/api/users/:userId/notifications', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
 
   if (!db.notifications) {
@@ -5841,8 +5789,8 @@ app.get('/api/users/:userId/notifications', (req, res) => {
 });
 
 // Marcar notificação como lida
-app.patch('/api/users/:userId/notifications/:notificationId/read', (req, res) => {
-  const db = readDB();
+app.patch('/api/users/:userId/notifications/:notificationId/read', async (req, res) => {
+  const db = await readDB();
   const { userId, notificationId } = req.params;
 
   if (!db.notifications) {
@@ -5869,8 +5817,8 @@ app.patch('/api/users/:userId/notifications/:notificationId/read', (req, res) =>
 });
 
 // Marcar todas as notificações como lidas
-app.post('/api/users/:userId/notifications/mark-all-read', (req, res) => {
-  const db = readDB();
+app.post('/api/users/:userId/notifications/mark-all-read', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
 
   if (!db.notifications) {
@@ -5902,8 +5850,8 @@ app.post('/api/users/:userId/notifications/mark-all-read', (req, res) => {
 });
 
 // Buscar configurações de notificações
-app.get('/api/users/:userId/notification-settings', (req, res) => {
-  const db = readDB();
+app.get('/api/users/:userId/notification-settings', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
 
   if (!db.notificationSettings) {
@@ -5946,8 +5894,8 @@ app.get('/api/users/:userId/notification-settings', (req, res) => {
 });
 
 // Atualizar configurações de notificações
-app.patch('/api/users/:userId/notification-settings', (req, res) => {
-  const db = readDB();
+app.patch('/api/users/:userId/notification-settings', async (req, res) => {
+  const db = await readDB();
   const { userId } = req.params;
   const updates = req.body;
 
@@ -6027,7 +5975,7 @@ app.patch('/api/users/:userId/notification-settings', (req, res) => {
 
 // Função helper para criar notificação (será usada por outras rotas)
 function createNotification(userId, type, title, message, metadata = {}) {
-  const db = readDB();
+  const db = await readDB();
 
   if (!db.notifications) {
     db.notifications = [];
@@ -6057,18 +6005,16 @@ function createNotification(userId, type, title, message, metadata = {}) {
 global.createNotification = createNotification;
 
 // Dashboard Stats
-app.get('/api/dashboard/stats', (req, res) => {
-  const db = readDB();
+app.get('/api/dashboard/stats', async (req, res) => {
+  const db = await readDB();
   const { userId, role } = req.query;
 
   let orders = db.orders;
 
-  // ✅ CORREÇÃO: SEMPRE filtrar por userId quando fornecido
-  // Apenas admins consultando sem userId podem ver todos os pedidos
-  if (userId) {
+  // Filtrar pedidos por usuário se não for admin
+  if (userId && role !== 'admin') {
     orders = orders.filter(o =>
-      String(o.producerId) === String(userId) ||
-      String(o.affiliateId) === String(userId)
+      o.producerId === userId || o.affiliateId === userId
     );
   }
 
@@ -6086,26 +6032,25 @@ app.get('/api/dashboard/stats', (req, res) => {
       .reduce((sum, o) => sum + o.totalValue, 0)
   };
 
-  // ✅ CORREÇÃO: Calcular comissões individuais do usuário
-  if (userId) {
+  // Se for produtor ou afiliado, calcular comissões
+  if (userId && role !== 'admin') {
     const userCommissions = db.commissions.filter(c =>
-      String(c.producerId) === String(userId) ||
-      String(c.affiliateId) === String(userId)
+      c.producerId === userId || c.affiliateId === userId
     );
 
     stats.totalCommissions = userCommissions
       .filter(c => c.status === 'paid')
       .reduce((sum, c) => {
-        if (String(c.producerId) === String(userId)) return sum + c.producerCommission;
-        if (String(c.affiliateId) === String(userId)) return sum + c.affiliateCommission;
+        if (c.producerId === userId) return sum + c.producerCommission;
+        if (c.affiliateId === userId) return sum + c.affiliateCommission;
         return sum;
       }, 0);
 
     stats.pendingCommissions = userCommissions
       .filter(c => c.status === 'pending')
       .reduce((sum, c) => {
-        if (String(c.producerId) === String(userId)) return sum + c.producerCommission;
-        if (String(c.affiliateId) === String(userId)) return sum + c.affiliateCommission;
+        if (c.producerId === userId) return sum + c.producerCommission;
+        if (c.affiliateId === userId) return sum + c.affiliateCommission;
         return sum;
       }, 0);
   }
@@ -6116,8 +6061,8 @@ app.get('/api/dashboard/stats', (req, res) => {
 // Endpoints específicos para AfterPay e gerenciamento de pedidos
 
 // Adicionar código de rastreio
-app.post('/api/orders/:id/tracking', (req, res) => {
-  const db = readDB();
+app.post('/api/orders/:id/tracking', async (req, res) => {
+  const db = await readDB();
   const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
 
   if (orderIndex === -1) {
@@ -6141,8 +6086,8 @@ app.post('/api/orders/:id/tracking', (req, res) => {
 });
 
 // Confirmar entrega (AfterPay)
-app.post('/api/orders/:id/confirm-delivery', (req, res) => {
-  const db = readDB();
+app.post('/api/orders/:id/confirm-delivery', async (req, res) => {
+  const db = await readDB();
   const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
 
   if (orderIndex === -1) {
@@ -6188,8 +6133,8 @@ app.post('/api/orders/:id/confirm-delivery', (req, res) => {
 });
 
 // Cancelar venda (AGENDADO)
-app.post('/api/orders/:id/cancel', (req, res) => {
-  const db = readDB();
+app.post('/api/orders/:id/cancel', async (req, res) => {
+  const db = await readDB();
   const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
 
   if (orderIndex === -1) {
@@ -6223,8 +6168,8 @@ app.post('/api/orders/:id/cancel', (req, res) => {
 });
 
 // Solicitar cancelamento (FRUSTRADO - requer aprovação admin)
-app.post('/api/orders/:id/request-cancellation', (req, res) => {
-  const db = readDB();
+app.post('/api/orders/:id/request-cancellation', async (req, res) => {
+  const db = await readDB();
   const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
 
   if (orderIndex === -1) {
@@ -6262,8 +6207,8 @@ app.post('/api/orders/:id/request-cancellation', (req, res) => {
 });
 
 // Solicitar estorno (PAGO - requer aprovação admin)
-app.post('/api/orders/:id/request-refund', (req, res) => {
-  const db = readDB();
+app.post('/api/orders/:id/request-refund', async (req, res) => {
+  const db = await readDB();
   const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
 
   if (orderIndex === -1) {
@@ -6309,8 +6254,8 @@ app.post('/api/orders/:id/request-refund', (req, res) => {
 });
 
 // Alterar data de vencimento do boleto
-app.post('/api/orders/:id/update-boleto', (req, res) => {
-  const db = readDB();
+app.post('/api/orders/:id/update-boleto', async (req, res) => {
+  const db = await readDB();
   const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
 
   if (orderIndex === -1) {
@@ -6339,8 +6284,8 @@ app.post('/api/orders/:id/update-boleto', (req, res) => {
 });
 
 // Atualizar telefone do cliente de um pedido
-app.patch('/api/orders/:id/update-phone', (req, res) => {
-  const db = readDB();
+app.patch('/api/orders/:id/update-phone', async (req, res) => {
+  const db = await readDB();
   const orderIndex = db.orders.findIndex(o => o.id === req.params.id);
 
   if (orderIndex === -1) {
@@ -6371,11 +6316,11 @@ app.patch('/api/orders/:id/update-phone', (req, res) => {
 // ========== ROTA DE ALTERAÇÃO DE SENHA ==========
 
 // Alterar senha do usuário
-app.post('/api/users/:userId/change-password', (req, res) => {
+app.post('/api/users/:userId/change-password', async (req, res) => {
   try {
     const { userId } = req.params;
     const { currentPassword, newPassword } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     // Validações básicas
     if (!currentPassword || !newPassword) {
@@ -6437,11 +6382,11 @@ app.post('/api/users/:userId/change-password', (req, res) => {
 // ========== ROTA DE ATUALIZAÇÃO DE PERFIL ==========
 
 // Atualizar dados do usuário
-app.patch('/api/users/:userId', (req, res) => {
+app.patch('/api/users/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const updates = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     // Buscar usuário
     const userIndex = db.users.findIndex(u => u.id === userId);
@@ -6488,7 +6433,7 @@ app.patch('/api/users/:userId', (req, res) => {
 app.get('/api/users/search-managers', async (req, res) => {
   try {
     const { email, productId } = req.query;
-    const db = readDB();
+    const db = await readDB();
 
     if (!email || email.length < 3) {
       return res.json({ users: [] });
@@ -6536,10 +6481,10 @@ app.get('/api/users/search-managers', async (req, res) => {
 });
 
 // Verificar se usuário pode ser gerente
-app.get('/api/users/:userId/can-be-manager', (req, res) => {
+app.get('/api/users/:userId/can-be-manager', async (req, res) => {
   try {
     const { userId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const user = db.users.find(u => u.id === userId);
 
@@ -6589,7 +6534,7 @@ app.get('/api/users/:userId/can-be-manager', (req, res) => {
 app.post('/api/managers', async (req, res) => {
   try {
     const { userId, productId, commissionConfig } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     // Validar campos obrigatórios
     if (!userId || !productId || !commissionConfig) {
@@ -6660,10 +6605,10 @@ app.post('/api/managers', async (req, res) => {
 });
 
 // Listar gerentes de um produto
-app.get('/api/products/:productId/managers', (req, res) => {
+app.get('/api/products/:productId/managers', async (req, res) => {
   try {
     const { productId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.managers) {
       return res.json([]);
@@ -6701,10 +6646,10 @@ app.get('/api/products/:productId/managers', (req, res) => {
 });
 
 // Listar afiliados de um produto
-app.get('/api/products/:productId/affiliates', (req, res) => {
+app.get('/api/products/:productId/affiliates', async (req, res) => {
   try {
     const { productId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     // Buscar afiliações ativas deste produto
     const affiliations = (db.affiliations || []).filter(
@@ -6730,11 +6675,11 @@ app.get('/api/products/:productId/affiliates', (req, res) => {
 });
 
 // Atualizar gerente
-app.patch('/api/managers/:managerId', (req, res) => {
+app.patch('/api/managers/:managerId', async (req, res) => {
   try {
     const { managerId } = req.params;
     const commissionConfig = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.managers) {
       return res.status(404).json({ error: 'Gerente não encontrado' });
@@ -6777,10 +6722,10 @@ app.patch('/api/managers/:managerId', (req, res) => {
 });
 
 // Desativar gerente
-app.delete('/api/managers/:managerId', (req, res) => {
+app.delete('/api/managers/:managerId', async (req, res) => {
   try {
     const { managerId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.managers) {
       return res.status(404).json({ error: 'Gerente não encontrado' });
@@ -6807,10 +6752,10 @@ app.delete('/api/managers/:managerId', (req, res) => {
 // ========== FIM DOS ENDPOINTS DE GERENTE ==========
 
 // ========== ENDPOINT: BUSCAR COMISSÕES DE UM PEDIDO ==========
-app.get('/api/orders/:orderId/commissions', (req, res) => {
+app.get('/api/orders/:orderId/commissions', async (req, res) => {
   try {
     const { orderId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     // Buscar todas as comissões deste pedido
     const commissions = (db.orderCommissions || [])
@@ -6852,8 +6797,8 @@ app.get('/api/orders/:orderId/commissions', (req, res) => {
 // ========== FIM DO ENDPOINT DE COMISSÕES ==========
 
 // Validar CPF bloqueado
-app.post('/api/checkout/validate-cpf', (req, res) => {
-  const db = readDB();
+app.post('/api/checkout/validate-cpf', async (req, res) => {
+  const db = await readDB();
   const { cpf, paymentMethod } = req.body;
 
   // Se não for AfterPay, não valida bloqueio
@@ -6881,8 +6826,8 @@ app.post('/api/checkout/validate-cpf', (req, res) => {
 });
 
 // Bloquear CPF (chamado ao criar pedido AfterPay)
-app.post('/api/checkout/block-cpf', (req, res) => {
-  const db = readDB();
+app.post('/api/checkout/block-cpf', async (req, res) => {
+  const db = await readDB();
   const { cpf, orderId } = req.body;
 
   if (!db.blockedCpfs) {
@@ -6904,9 +6849,9 @@ app.post('/api/checkout/block-cpf', (req, res) => {
 // ========== ROTAS DE RASTREAMENTO DE ABANDONOS ==========
 
 // Criar/Atualizar rastreamento de checkout abandonado
-app.post('/api/checkout/track', (req, res) => {
+app.post('/api/checkout/track', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const { productId, customer, step, value, sessionId } = req.body;
 
     if (!db.abandonedCheckouts) {
@@ -6957,9 +6902,9 @@ app.post('/api/checkout/track', (req, res) => {
 });
 
 // Marcar checkout como convertido (quando finaliza compra)
-app.post('/api/checkout/track/:sessionId/convert', (req, res) => {
+app.post('/api/checkout/track/:sessionId/convert', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const { sessionId } = req.params;
 
     if (!db.abandonedCheckouts) {
@@ -6984,9 +6929,9 @@ app.post('/api/checkout/track/:sessionId/convert', (req, res) => {
 });
 
 // Buscar carrinhos abandonados (para página de Abandonos)
-app.get('/api/reports/abandoned', (req, res) => {
+app.get('/api/reports/abandoned', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const userId = req.query.userId;
 
     if (!db.abandonedCheckouts) {
@@ -7043,9 +6988,9 @@ app.get('/api/reports/abandoned', (req, res) => {
 });
 
 // Enviar lembrete de carrinho abandonado
-app.post('/api/abandoned/:id/reminder', (req, res) => {
+app.post('/api/abandoned/:id/reminder', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const { id } = req.params;
 
     if (!db.abandonedCheckouts) {
@@ -7080,9 +7025,9 @@ app.post('/api/abandoned/:id/reminder', (req, res) => {
 // ========== RELATÓRIO DE CHURN RATE ==========
 
 // GET /api/reports/churn - Calcular churn rate baseado em dados reais
-app.get('/api/reports/churn', (req, res) => {
+app.get('/api/reports/churn', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const userId = req.query.userId;
 
     // Pegar todos os usuários
@@ -7184,8 +7129,8 @@ app.get('/api/reports/churn', (req, res) => {
 // ========== FIM DO RELATÓRIO DE CHURN RATE ==========
 
 // Webhook de pagamento (simulado)
-app.post('/api/webhooks/payment', (req, res) => {
-  const db = readDB();
+app.post('/api/webhooks/payment', async (req, res) => {
+  const db = await readDB();
   const { orderId, status } = req.body; // status: 'paid', 'failed'
 
   const orderIndex = db.orders.findIndex(o => o.id === orderId);
@@ -7229,8 +7174,8 @@ app.post('/api/webhooks/payment', (req, res) => {
 });
 
 // Webhook de rastreio Correios (simulado)
-app.post('/api/webhooks/tracking', (req, res) => {
-  const db = readDB();
+app.post('/api/webhooks/tracking', async (req, res) => {
+  const db = await readDB();
   const { trackingCode, status, location, date } = req.body;
 
   const orderIndex = db.orders.findIndex(o => o.trackingCode === trackingCode);
@@ -7259,7 +7204,7 @@ app.post('/api/webhooks/tracking', (req, res) => {
 // Job de rastreio Correios - a cada 15 minutos
 cron.schedule('*/15 * * * *', () => {
   console.log('🚚 Executando job de rastreio Correios...');
-  const db = readDB();
+  const db = await readDB();
 
   const ordersWithTracking = db.orders.filter(o =>
     o.trackingCode &&
@@ -7277,7 +7222,7 @@ cron.schedule('*/15 * * * *', () => {
 // Job de verificação de pagamento - a cada 5 minutos (fallback)
 cron.schedule('*/5 * * * *', () => {
   console.log('💰 Executando job de verificação de pagamento...');
-  const db = readDB();
+  const db = await readDB();
 
   const pendingOrders = db.orders.filter(o =>
     o.paymentStatus === 'pending' ||
@@ -7294,7 +7239,7 @@ cron.schedule('*/5 * * * *', () => {
 // Job de verificação de atraso AfterPay - diariamente às 00:00
 cron.schedule('0 0 * * *', () => {
   console.log('⏰ Executando job de verificação de atraso AfterPay...');
-  const db = readDB();
+  const db = await readDB();
   let updated = false;
 
   const afterPayOrders = db.orders.filter(o =>
@@ -7336,7 +7281,7 @@ cron.schedule('0 0 * * *', () => {
 // Job de expiração PIX - a cada 1 hora
 cron.schedule('0 * * * *', () => {
   console.log('💎 Executando job de expiração PIX...');
-  const db = readDB();
+  const db = await readDB();
   let updated = false;
 
   const pixOrders = db.orders.filter(o =>
@@ -7368,7 +7313,7 @@ cron.schedule('0 * * * *', () => {
 // Job de expiração Boleto - diariamente às 06:00
 cron.schedule('0 6 * * *', () => {
   console.log('🏦 Executando job de expiração Boleto...');
-  const db = readDB();
+  const db = await readDB();
   let updated = false;
 
   const boletoOrders = db.orders.filter(o =>
@@ -7412,7 +7357,7 @@ cron.schedule('0 * * * *', () => {
 // Job de detecção de carrinhos abandonados - a cada 30 minutos
 cron.schedule('*/30 * * * *', () => {
   console.log('🛒 Executando job de detecção de carrinhos abandonados...');
-  const db = readDB();
+  const db = await readDB();
   let updated = false;
 
   if (!db.abandonedCheckouts) {
@@ -7450,9 +7395,9 @@ cron.schedule('*/30 * * * *', () => {
 // ============ ROTAS DE REEMBOLSOS ============
 
 // Listar todos os reembolsos pendentes (Admin)
-app.get('/api/refunds/pending', (req, res) => {
+app.get('/api/refunds/pending', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     // Buscar todos os pedidos com status de reembolso pendente
     const pendingRefunds = db.orders?.filter(order =>
@@ -7494,10 +7439,10 @@ app.get('/api/refunds/pending', (req, res) => {
 });
 
 // Obter detalhes de um reembolso específico
-app.get('/api/refunds/:orderId', (req, res) => {
+app.get('/api/refunds/:orderId', async (req, res) => {
   try {
     const { orderId } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const order = db.orders?.find(o => o.id === orderId);
     if (!order) {
@@ -7553,7 +7498,7 @@ app.post('/api/refunds/:orderId/approve', async (req, res) => {
   try {
     const { orderId } = req.params;
     const { adminNotes } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     const orderIndex = db.orders?.findIndex(o => o.id === orderId);
     if (orderIndex === -1) {
@@ -7659,11 +7604,11 @@ app.post('/api/refunds/:orderId/approve', async (req, res) => {
 });
 
 // Recusar reembolso
-app.post('/api/refunds/:orderId/reject', (req, res) => {
+app.post('/api/refunds/:orderId/reject', async (req, res) => {
   try {
     const { orderId } = req.params;
     const { rejectionReason, adminNotes } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     if (!rejectionReason || rejectionReason.trim() === '') {
       return res.status(400).json({
@@ -7717,11 +7662,11 @@ app.post('/api/refunds/:orderId/reject', (req, res) => {
 });
 
 // Solicitar reembolso (Cliente/Vendedor)
-app.post('/api/orders/:orderId/request-refund', (req, res) => {
+app.post('/api/orders/:orderId/request-refund', async (req, res) => {
   try {
     const { orderId } = req.params;
     const { reason, requestedBy } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     if (!reason || reason.trim() === '') {
       return res.status(400).json({
@@ -7778,7 +7723,7 @@ app.post('/api/orders/:orderId/request-refund', (req, res) => {
 // Gerar PIX
 app.post('/api/payments/pix/generate', async (req, res) => {
   const { orderId, amount } = req.body
-  const db = readDB()
+  const db = await readDB()
 
   try {
     // Buscar o pedido
@@ -7791,7 +7736,7 @@ app.post('/api/payments/pix/generate', async (req, res) => {
     }
 
     // Buscar configuração da Pagar.me
-    const apiKey = getPagarmeApiKey()
+    const apiKey = await getPagarmeApiKey()
     if (!apiKey) {
       console.error('❌ PAGARME_API_KEY não configurada')
       return res.status(500).json({
@@ -7912,7 +7857,7 @@ app.post('/api/payments/pix/generate', async (req, res) => {
 // Gerar Boleto
 app.post('/api/payments/boleto/generate', async (req, res) => {
   const { orderId, amount } = req.body
-  const db = readDB()
+  const db = await readDB()
 
   try {
     // Buscar o pedido
@@ -7925,7 +7870,7 @@ app.post('/api/payments/boleto/generate', async (req, res) => {
     }
 
     // Buscar configuração da Pagar.me
-    const apiKey = getPagarmeApiKey()
+    const apiKey = await getPagarmeApiKey()
     if (!apiKey) {
       console.error('❌ PAGARME_API_KEY não configurada')
       return res.status(500).json({
@@ -8044,7 +7989,7 @@ app.post('/api/payments/boleto/generate', async (req, res) => {
 })
 
 // Download PDF do Boleto
-app.get('/api/payments/boleto/:orderId/pdf', (req, res) => {
+app.get('/api/payments/boleto/:orderId/pdf', async (req, res) => {
   // Na produção, gerar PDF real do boleto
   res.send(`
     <html>
@@ -8091,7 +8036,7 @@ app.get('/api/payments/boleto/:orderId/pdf', (req, res) => {
 // Processar Cartão de Crédito
 app.post('/api/payments/credit-card/process', async (req, res) => {
   const { orderId, amount, cardNumber, cardName, expiryDate, cvv, installments } = req.body
-  const db = readDB()
+  const db = await readDB()
 
   // Validações básicas
   if (!cardNumber || cardNumber.length !== 16) {
@@ -8125,7 +8070,7 @@ app.post('/api/payments/credit-card/process', async (req, res) => {
     }
 
     // Buscar configuração da Pagar.me do vendedor
-    const apiKey = getPagarmeApiKey()
+    const apiKey = await getPagarmeApiKey()
     if (!apiKey) {
       console.error('❌ PAGARME_API_KEY não configurada')
       return res.status(500).json({
@@ -8364,7 +8309,7 @@ function getRefusalReason(status, acquirerCode) {
 
 // Função para enviar pedido ao Notazz (assíncrona, não bloqueia a resposta)
 async function enviarPedidoNotazz(orderId, userId) {
-  const db = readDB();
+  const db = await readDB();
   let notazzPayload = null; // Declarar fora do try para acessar no catch
 
   try {
@@ -8736,7 +8681,7 @@ function formatPhoneToInternational(phone) {
 
 // Função para disparar webhooks em português
 async function dispararWebhookPortugues(userId, evento, dadosPedido) {
-  const db = readDB()
+  const db = await readDB()
 
   console.log(`\n🔔 ====== DISPARANDO WEBHOOK ======`)
   console.log(`👤 UserId: ${userId}`)
@@ -8970,9 +8915,9 @@ async function dispararWebhookPortugues(userId, evento, dadosPedido) {
 // ============ SIMULAÇÃO E WEBHOOKS ============
 
 // Simular confirmação de pagamento (para testes)
-app.post('/api/payments/simulate-confirmation', (req, res) => {
+app.post('/api/payments/simulate-confirmation', async (req, res) => {
   const { orderId } = req.body
-  const db = readDB()
+  const db = await readDB()
 
   const orderIndex = db.orders.findIndex(o => o.id === orderId)
   if (orderIndex === -1) {
@@ -9021,7 +8966,7 @@ app.post('/api/payments/simulate-confirmation', (req, res) => {
 })
 
 // Webhook genérico para confirmação de pagamento (para integração com gateways)
-app.post('/api/webhooks/payment-confirmation', (req, res) => {
+app.post('/api/webhooks/payment-confirmation', async (req, res) => {
   const { orderId, transactionId, status, amount, paymentMethod } = req.body
 
   console.log('🔔 Webhook recebido:', {
@@ -9032,7 +8977,7 @@ app.post('/api/webhooks/payment-confirmation', (req, res) => {
     paymentMethod
   })
 
-  const db = readDB()
+  const db = await readDB()
   const orderIndex = db.orders.findIndex(o => o.id === orderId)
 
   if (orderIndex === -1) {
@@ -9109,8 +9054,8 @@ app.post('/api/webhooks/payment-confirmation', (req, res) => {
 // 🚚 ========== INTEGRAÇÃO 123LOG ========== //
 
 // Obter configuração da integração 123Log
-app.get('/api/integrations/123log', (req, res) => {
-  const db = readDB()
+app.get('/api/integrations/123log', async (req, res) => {
+  const db = await readDB()
   const integration = db.logisticsIntegrations?.['123log'] || {
     enabled: false,
     webhookKey: '',
@@ -9125,8 +9070,8 @@ app.get('/api/integrations/123log', (req, res) => {
 })
 
 // Atualizar configuração da integração 123Log
-app.put('/api/integrations/123log', (req, res) => {
-  const db = readDB()
+app.put('/api/integrations/123log', async (req, res) => {
+  const db = await readDB()
   const { webhookKey, notificationSettings } = req.body
 
   if (!db.logisticsIntegrations) {
@@ -9161,7 +9106,7 @@ app.put('/api/integrations/123log', (req, res) => {
 
 // Testar webhook 123Log
 app.post('/api/integrations/123log/test', async (req, res) => {
-  const db = readDB()
+  const db = await readDB()
   const integration = db.logisticsIntegrations?.['123log']
 
   // Permitir teste mesmo sem configuração (para desenvolvimento)
@@ -9267,8 +9212,8 @@ app.post('/api/integrations/123log/test', async (req, res) => {
 })
 
 // Obter logs de webhooks
-app.get('/api/webhooks/logs', (req, res) => {
-  const db = readDB()
+app.get('/api/webhooks/logs', async (req, res) => {
+  const db = await readDB()
   const { source, limit = 20 } = req.query
 
   let logs = db.webhookLogs || []
@@ -9286,7 +9231,7 @@ app.get('/api/webhooks/logs', (req, res) => {
 app.post('/api/webhooks/123log', async (req, res) => {
   console.log('📦 Webhook 123Log recebido:', JSON.stringify(req.body, null, 2))
 
-  const db = readDB()
+  const db = await readDB()
 
   // Extrair dados do formato real da 123Log
   const {
@@ -9635,8 +9580,8 @@ app.post('/api/webhooks/123log', async (req, res) => {
 // ==================== ROTAS DE TAXAS DA PLATAFORMA ====================
 
 // ✅ Buscar taxas da plataforma por adquirente
-app.get('/api/platform-fees/:acquirer', (req, res) => {
-  const db = readDB();
+app.get('/api/platform-fees/:acquirer', async (req, res) => {
+  const db = await readDB();
   const { acquirer } = req.params;
 
   // Estrutura de taxas padrão
@@ -9701,8 +9646,8 @@ app.get('/api/platform-fees/:acquirer', (req, res) => {
 });
 
 // ✅ Salvar taxas da plataforma por adquirente
-app.post('/api/platform-fees', (req, res) => {
-  const db = readDB();
+app.post('/api/platform-fees', async (req, res) => {
+  const db = await readDB();
   const { acquirer, type, data } = req.body;
 
   if (!db.platformFeesByAcquirer) {
@@ -9758,7 +9703,7 @@ app.post('/api/platform-fees', (req, res) => {
 app.post('/api/withdrawals/:id/approve', async (req, res) => {
   try {
     const { id } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     // Buscar saque
     if (!db.withdrawals) db.withdrawals = [];
@@ -9810,7 +9755,7 @@ app.post('/api/withdrawals/:id/approve', async (req, res) => {
 
     // Criar transferência na Pagar.me
     try {
-      const apiKey = getPagarmeApiKey();
+      const apiKey = await getPagarmeApiKey();
       if (!apiKey) {
         throw new Error('PAGARME_API_KEY não configurada. Configure em: Configurações > Integrações > Pagar.me');
       }
@@ -9921,7 +9866,7 @@ app.post('/api/withdrawals/:id/reject', async (req, res) => {
       });
     }
 
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.withdrawals) db.withdrawals = [];
     const withdrawalIndex = db.withdrawals.findIndex(w => w.id === id);
@@ -9999,9 +9944,9 @@ app.post('/api/withdrawals/:id/reject', async (req, res) => {
 /**
  * Listar todos os saques
  */
-app.get('/api/withdrawals', (req, res) => {
+app.get('/api/withdrawals', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const { status, sellerId, userId } = req.query;
 
     let withdrawals = db.withdrawals || [];
@@ -10011,14 +9956,11 @@ app.get('/api/withdrawals', (req, res) => {
       withdrawals = withdrawals.filter(w => w.status === status);
     }
 
-    // ✅ CORREÇÃO: Filtrar saques do usuário com conversão de tipo
+    // Filtrar por vendedor (userId ou sellerId)
     if (userId) {
-      withdrawals = withdrawals.filter(w =>
-        String(w.userId) === String(userId) ||
-        String(w.sellerId) === String(userId)
-      );
+      withdrawals = withdrawals.filter(w => w.userId === userId || w.sellerId === userId);
     } else if (sellerId) {
-      withdrawals = withdrawals.filter(w => String(w.sellerId) === String(sellerId));
+      withdrawals = withdrawals.filter(w => w.sellerId === parseInt(sellerId));
     }
 
     // Ordenar por data de solicitação (mais recentes primeiro)
@@ -10039,10 +9981,10 @@ app.get('/api/withdrawals', (req, res) => {
 /**
  * Criar nova solicitação de saque
  */
-app.post('/api/withdrawals', (req, res) => {
+app.post('/api/withdrawals', async (req, res) => {
   try {
     const { userId, amount, bankAccountId, status } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     if (!userId || !amount || !bankAccountId) {
       return res.status(400).json({
@@ -10105,10 +10047,10 @@ app.post('/api/withdrawals', (req, res) => {
 /**
  * Buscar detalhes de um saque específico
  */
-app.get('/api/withdrawals/:id', (req, res) => {
+app.get('/api/withdrawals/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     const withdrawal = db.withdrawals?.find(w => w.id === id);
 
@@ -10139,10 +10081,10 @@ app.get('/api/withdrawals/:id', (req, res) => {
 /**
  * Listar contas bancárias de um usuário
  */
-app.get('/api/bank-accounts', (req, res) => {
+app.get('/api/bank-accounts', async (req, res) => {
   try {
     const { userId } = req.query;
-    const db = readDB();
+    const db = await readDB();
 
     if (!userId) {
       return res.status(400).json({
@@ -10178,10 +10120,10 @@ app.get('/api/bank-accounts', (req, res) => {
 /**
  * Criar nova conta bancária
  */
-app.post('/api/bank-accounts', (req, res) => {
+app.post('/api/bank-accounts', async (req, res) => {
   try {
     const { userId, bankCode, bankName, agency, accountNumber, accountType, holderName, holderDocument } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     if (!userId) {
       return res.status(400).json({
@@ -10241,9 +10183,9 @@ app.post('/api/bank-accounts', (req, res) => {
 // =====================================================
 
 // Listar membros da equipe
-app.get('/api/platform/team/members', (req, res) => {
+app.get('/api/platform/team/members', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamMembers) {
       db.teamMembers = [];
@@ -10267,9 +10209,9 @@ app.get('/api/platform/team/members', (req, res) => {
 });
 
 // Criar novo membro da equipe
-app.post('/api/platform/team/members', (req, res) => {
+app.post('/api/platform/team/members', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamMembers) {
       db.teamMembers = [];
@@ -10301,10 +10243,10 @@ app.post('/api/platform/team/members', (req, res) => {
 });
 
 // Atualizar membro da equipe
-app.patch('/api/platform/team/members/:id', (req, res) => {
+app.patch('/api/platform/team/members/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamMembers) {
       return res.status(404).json({ error: 'Membro não encontrado' });
@@ -10331,11 +10273,11 @@ app.patch('/api/platform/team/members/:id', (req, res) => {
 });
 
 // Atualizar status do membro
-app.patch('/api/platform/team/members/:id/status', (req, res) => {
+app.patch('/api/platform/team/members/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamMembers) {
       return res.status(404).json({ error: 'Membro não encontrado' });
@@ -10359,10 +10301,10 @@ app.patch('/api/platform/team/members/:id/status', (req, res) => {
 });
 
 // Deletar membro da equipe
-app.delete('/api/platform/team/members/:id', (req, res) => {
+app.delete('/api/platform/team/members/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamMembers) {
       return res.status(404).json({ error: 'Membro não encontrado' });
@@ -10385,9 +10327,9 @@ app.delete('/api/platform/team/members/:id', (req, res) => {
 });
 
 // Listar funções (roles)
-app.get('/api/platform/team/roles', (req, res) => {
+app.get('/api/platform/team/roles', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamRoles) {
       db.teamRoles = [];
@@ -10407,9 +10349,9 @@ app.get('/api/platform/team/roles', (req, res) => {
 });
 
 // Criar nova função
-app.post('/api/platform/team/roles', (req, res) => {
+app.post('/api/platform/team/roles', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamRoles) {
       db.teamRoles = [];
@@ -10434,10 +10376,10 @@ app.post('/api/platform/team/roles', (req, res) => {
 });
 
 // Atualizar função
-app.patch('/api/platform/team/roles/:id', (req, res) => {
+app.patch('/api/platform/team/roles/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamRoles) {
       return res.status(404).json({ error: 'Função não encontrada' });
@@ -10464,10 +10406,10 @@ app.patch('/api/platform/team/roles/:id', (req, res) => {
 });
 
 // Deletar função
-app.delete('/api/platform/team/roles/:id', (req, res) => {
+app.delete('/api/platform/team/roles/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamRoles) {
       return res.status(404).json({ error: 'Função não encontrada' });
@@ -10496,9 +10438,9 @@ app.delete('/api/platform/team/roles/:id', (req, res) => {
 });
 
 // Listar atividades da equipe
-app.get('/api/platform/team/activities', (req, res) => {
+app.get('/api/platform/team/activities', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamActivities) {
       db.teamActivities = [];
@@ -10515,9 +10457,9 @@ app.get('/api/platform/team/activities', (req, res) => {
 });
 
 // Registrar nova atividade
-app.post('/api/platform/team/activities', (req, res) => {
+app.post('/api/platform/team/activities', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.teamActivities) {
       db.teamActivities = [];
@@ -10554,9 +10496,9 @@ app.post('/api/platform/team/activities', (req, res) => {
 });
 
 // Estatísticas da equipe
-app.get('/api/platform/team/stats', (req, res) => {
+app.get('/api/platform/team/stats', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     const members = db.teamMembers || [];
     const roles = db.teamRoles || [];
@@ -10620,9 +10562,9 @@ app.get('/api/platform/team/stats', (req, res) => {
 // =====================================================
 
 // GET - Buscar configurações da plataforma
-app.get('/api/platform/settings', (req, res) => {
+app.get('/api/platform/settings', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const settings = db.platformSettings || {
       images: {},
       texts: {},
@@ -10642,7 +10584,7 @@ app.post('/api/platform/settings/images', upload.fields([
   { name: 'achievementLogo', maxCount: 1 }
 ]), (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.platformSettings) {
       db.platformSettings = { images: {}, texts: {}, extras: {} };
@@ -10691,9 +10633,9 @@ app.post('/api/platform/settings/images', upload.fields([
 });
 
 // POST - Salvar textos da plataforma
-app.post('/api/platform/settings/texts', (req, res) => {
+app.post('/api/platform/settings/texts', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.platformSettings) {
       db.platformSettings = { images: {}, texts: {}, extras: {} };
@@ -10723,9 +10665,9 @@ app.post('/api/platform/settings/texts', (req, res) => {
 });
 
 // POST - Salvar configurações extras
-app.post('/api/platform/settings/extras', (req, res) => {
+app.post('/api/platform/settings/extras', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.platformSettings) {
       db.platformSettings = { images: {}, texts: {}, extras: {} };
@@ -10749,9 +10691,9 @@ app.post('/api/platform/settings/extras', (req, res) => {
 });
 
 // GET: Buscar configurações financeiras (Prefixo da fatura)
-app.get('/api/platform/settings/financial', (req, res) => {
+app.get('/api/platform/settings/financial', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const financial = db.platformSettings?.financial || {};
 
     res.json({
@@ -10765,7 +10707,7 @@ app.get('/api/platform/settings/financial', (req, res) => {
 });
 
 // POST: Salvar configurações financeiras (Prefixo da fatura)
-app.post('/api/platform/settings/financial', (req, res) => {
+app.post('/api/platform/settings/financial', async (req, res) => {
   try {
     const { invoicePrefix } = req.body;
 
@@ -10777,7 +10719,7 @@ app.post('/api/platform/settings/financial', (req, res) => {
       });
     }
 
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.platformSettings) {
       db.platformSettings = { images: {}, texts: {}, extras: {}, financial: {} };
@@ -10804,9 +10746,9 @@ app.post('/api/platform/settings/financial', (req, res) => {
 });
 
 // GET: Buscar configurações de roteamento de adquirentes
-app.get('/api/platform/settings/acquirer-routing', (req, res) => {
+app.get('/api/platform/settings/acquirer-routing', async (req, res) => {
   try {
-    const db = readDB();
+    const db = await readDB();
     const routing = db.platformSettings?.acquirerRouting || {
       pix: [],
       cartao: [],
@@ -10825,11 +10767,11 @@ app.get('/api/platform/settings/acquirer-routing', (req, res) => {
 });
 
 // POST: Salvar configurações de roteamento de adquirentes
-app.post('/api/platform/settings/acquirer-routing', (req, res) => {
+app.post('/api/platform/settings/acquirer-routing', async (req, res) => {
   try {
     const { pix, cartao, boleto, saque } = req.body;
 
-    const db = readDB();
+    const db = await readDB();
 
     if (!db.platformSettings) {
       db.platformSettings = { images: {}, texts: {}, extras: {}, financial: {}, acquirerRouting: {} };
@@ -10865,10 +10807,10 @@ app.post('/api/platform/settings/acquirer-routing', (req, res) => {
 // ========== ENDPOINTS DE LOGS DA PLATAFORMA ==========
 
 // Obter todos os logs da plataforma
-app.get('/api/platform/logs', (req, res) => {
+app.get('/api/platform/logs', async (req, res) => {
   console.log('📋 Buscando logs da plataforma...');
 
-  const db = readDB();
+  const db = await readDB();
   let logs = db.platformLogs || [];
 
   // Filtros opcionais
@@ -10908,7 +10850,7 @@ app.get('/api/platform/logs', (req, res) => {
 });
 
 // Criar um novo log manualmente (para testes)
-app.post('/api/platform/logs', (req, res) => {
+app.post('/api/platform/logs', async (req, res) => {
   const { level, action, user, description, details } = req.body;
   const ip = req.ip || req.connection.remoteAddress;
 
@@ -10924,10 +10866,10 @@ app.post('/api/platform/logs', (req, res) => {
 });
 
 // Limpar logs (apenas para admin)
-app.delete('/api/platform/logs', (req, res) => {
+app.delete('/api/platform/logs', async (req, res) => {
   console.log('🗑️ Limpando logs da plataforma...');
 
-  const db = readDB();
+  const db = await readDB();
   db.platformLogs = [];
   saveDB(db);
 

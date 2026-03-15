@@ -16,9 +16,8 @@
     "db:seed": "node scripts/migrate-json-to-postgres.js",
     "prisma:studio": "npx prisma studio",
     "prisma:generate": "npx prisma generate",
-    "seed": "node prisma/seed.js",
-    "postinstall": "npx prisma generate && npm run seed"
-     },
+    "seed": "node prisma/seed.js"
+  },
   "prisma": {
     "seed": "node prisma/seed.js"
   },

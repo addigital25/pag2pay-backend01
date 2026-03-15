@@ -1,15 +1,10 @@
-FROM node:20-alpine
+# Use Node.js 18
+FROM node:18-alpine
 
-# Instalar dependências do sistema
-RUN apk add --no-cache \
-    openssl \
-    ca-certificates \
-    curl
-
-# Criar diretório da aplicação
+# Diretório de trabalho
 WORKDIR /app
 
-# Copiar package.json e package-lock.json
+# Copiar arquivos de dependências
 COPY package*.json ./
 
 # Instalar dependências
@@ -22,14 +17,10 @@ COPY . .
 RUN npx prisma generate
 
 # Criar diretório de uploads
-RUN mkdir -p uploads && chmod 777 uploads
+RUN mkdir -p uploads
 
 # Expor porta
-EXPOSE 3001
+EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:3001/health || exit 1
-
-# Comando para iniciar
+# Comando de start: executar seed DEPOIS iniciar servidor
 CMD ["sh", "-c", "node prisma/seed.js && node server.js"]

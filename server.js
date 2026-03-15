@@ -10907,6 +10907,64 @@ app.delete('/api/platform/logs', async (req, res) => {
   res.json({ success: true, message: 'Logs limpos com sucesso' });
 });
 
+// =====================================================
+// ENDPOINT ESPECIAL: MIGRAÇÃO FORÇADA DE DADOS
+// =====================================================
+app.post('/api/admin/force-migrate-data', async (req, res) => {
+  try {
+    console.log('🔄 Iniciando migração forçada de dados...');
+
+    // Verificar se existe database.json
+    if (!existsSync(DB_FILE)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Arquivo database.json não encontrado'
+      });
+    }
+
+    // Ler dados do database.json
+    const fileData = JSON.parse(readFileSync(DB_FILE, 'utf-8'));
+    console.log('📦 Dados lidos do database.json');
+    console.log(`   - Usuários: ${fileData.users?.length || 0}`);
+    console.log(`   - Produtos: ${fileData.products?.length || 0}`);
+    console.log(`   - Pedidos: ${fileData.orders?.length || 0}`);
+
+    // Salvar no PostgreSQL (forçado)
+    await prisma.databaseSnapshot.upsert({
+      where: { id: 'singleton' },
+      update: {
+        data: fileData,
+        updatedAt: new Date()
+      },
+      create: {
+        id: 'singleton',
+        data: fileData
+      }
+    });
+
+    console.log('✅ Dados migrados com sucesso para PostgreSQL!');
+
+    res.json({
+      success: true,
+      message: 'Dados migrados com sucesso!',
+      stats: {
+        users: fileData.users?.length || 0,
+        products: fileData.products?.length || 0,
+        orders: fileData.orders?.length || 0,
+        pagarmeConfigs: fileData.pagarmeConfigs?.length || 0
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Erro na migração:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao migrar dados',
+      details: error.message
+    });
+  }
+});
+
 console.log('⏰ Jobs agendados:');
 console.log('  - Rastreio Correios: a cada 15 minutos');
 console.log('  - Verificação de pagamento: a cada 5 minutos');

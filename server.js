@@ -1118,6 +1118,39 @@ app.get('/api/platform/financial-stats', async (req, res) => {
 
 // Rotas de Autenticação
 
+// Platform Admin Login - Compatibility route for frontend
+app.post('/api/platform/login', async (req, res) => {
+  const db = await readDB();
+  const { email, password } = req.body;
+
+  console.log(`🔐 Tentativa de login de admin: ${email}`);
+
+  const user = db.users.find(u => u.email === email && u.role === 'admin');
+
+  if (!user) {
+    console.log(`❌ Usuário não encontrado ou não é admin: ${email}`);
+    return res.status(401).json({ success: false, error: 'Credenciais inválidas' });
+  }
+
+  console.log(`👤 Usuário encontrado: ${user.email}, verificando senha...`);
+
+  // Verificar senha com bcrypt
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+
+  if (isPasswordValid) {
+    console.log(`✅ Login de admin bem-sucedido: ${user.email}`);
+    const { password: _, ...userWithoutPassword } = user;
+    res.json({
+      success: true,
+      user: userWithoutPassword,
+      token: uuidv4()
+    });
+  } else {
+    console.log(`❌ Senha inválida para: ${email}`);
+    res.status(401).json({ success: false, error: 'Credenciais inválidas' });
+  }
+});
+
 // Login de Usuário
 app.post('/api/auth/login/user', async (req, res) => {
   const db = await readDB();
@@ -11008,6 +11041,131 @@ app.get('/api/admin/debug-database', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// =====================================================
+// ENDPOINT ESPECIAL: RESETAR SENHA DE USUÁRIO
+// =====================================================
+app.post('/api/admin/reset-password', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email e newPassword são obrigatórios'
+      });
+    }
+
+    console.log(`🔑 Resetando senha do usuário: ${email}`);
+
+    const db = await readDB();
+
+    const userIndex = db.users?.findIndex(u => u.email === email);
+
+    if (userIndex === -1 || userIndex === undefined) {
+      return res.status(404).json({
+        success: false,
+        error: 'Usuário não encontrado'
+      });
+    }
+
+    // Criar hash da nova senha
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Atualizar senha
+    db.users[userIndex].password = hashedPassword;
+    db.users[userIndex].updatedAt = new Date().toISOString();
+
+    await writeDB(db);
+
+    console.log(`✅ Senha resetada com sucesso para: ${email}`);
+
+    res.json({
+      success: true,
+      message: 'Senha resetada com sucesso!',
+      user: {
+        email: db.users[userIndex].email,
+        name: db.users[userIndex].name
+      },
+      newPassword: newPassword
+    });
+
+  } catch (error) {
+    console.error('❌ Erro ao resetar senha:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao resetar senha',
+      details: error.message
+    });
+  }
+});
+
+// =====================================================
+// ENDPOINT ESPECIAL: TESTAR SENHAS DO ADMIN
+// =====================================================
+app.post('/api/admin/test-password', async (req, res) => {
+  try {
+    const { email, passwords } = req.body;
+
+    if (!email || !passwords || !Array.isArray(passwords)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email e array de passwords são obrigatórios'
+      });
+    }
+
+    console.log(`🔍 Testando senhas para: ${email}`);
+
+    const db = await readDB();
+    const user = db.users?.find(u => u.email === email);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Usuário não encontrado'
+      });
+    }
+
+    // Testar cada senha
+    const results = [];
+    for (const password of passwords) {
+      try {
+        const match = await bcrypt.compare(password, user.password);
+        results.push({
+          password: password,
+          matches: match
+        });
+        if (match) {
+          console.log(`✅ SENHA ENCONTRADA: ${password}`);
+        }
+      } catch (err) {
+        results.push({
+          password: password,
+          matches: false,
+          error: 'Erro ao comparar'
+        });
+      }
+    }
+
+    const correctPassword = results.find(r => r.matches);
+
+    res.json({
+      success: true,
+      email: email,
+      userName: user.name,
+      results: results,
+      correctPassword: correctPassword ? correctPassword.password : null
+    });
+
+  } catch (error) {
+    console.error('❌ Erro ao testar senhas:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao testar senhas',
+      details: error.message
     });
   }
 });

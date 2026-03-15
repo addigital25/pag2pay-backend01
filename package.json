@@ -15,7 +15,12 @@
     "db:push": "npx prisma db push",
     "db:seed": "node scripts/migrate-json-to-postgres.js",
     "prisma:studio": "npx prisma studio",
-    "prisma:generate": "npx prisma generate"
+    "prisma:generate": "npx prisma generate",
+    "seed": "node prisma/seed.js",
+    "postinstall": "npx prisma generate && npm run seed"
+     },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
